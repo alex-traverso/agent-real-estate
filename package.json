@@ -1,0 +1,10 @@
+{
+  "name": "agent-real-estate",
+  "packageManager": "yarn@4.17.0",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
