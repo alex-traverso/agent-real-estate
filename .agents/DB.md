@@ -53,6 +53,19 @@ CREATE TABLE agencies (
 );
 ```
 
+#### `agency_users`
+Join table between Supabase Auth users and agencies. Required by the RLS policies below to resolve `auth.uid()` → `agency_id` for the admin panel — without it, those policies have no way to determine which agency the requesting advisor belongs to.
+
+```sql
+CREATE TABLE agency_users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agency_id UUID NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE (agency_id, user_id)
+);
+```
+
 #### `properties`
 Real estate listings. Includes a `embedding` column for pgvector semantic search.
 
@@ -159,10 +172,16 @@ CREATE INDEX idx_properties_available ON properties(agency_id, available) WHERE 
 -- Leads: advisor dashboard queries
 CREATE INDEX idx_leads_agency_id ON leads(agency_id);
 CREATE INDEX idx_leads_agency_status ON leads(agency_id, status);
+CREATE INDEX idx_leads_property_id ON leads(property_id); -- unindexed FK (Supabase linter: unindexed_foreign_keys)
 
 -- Conversations: webhook lookup by phone
 CREATE INDEX idx_conversations_agency_phone ON conversations(agency_id, phone);
 CREATE INDEX idx_conversations_active ON conversations(agency_id, phone, status) WHERE status = 'active';
+CREATE INDEX idx_conversations_lead_id ON conversations(lead_id); -- unindexed FK (Supabase linter: unindexed_foreign_keys)
+
+-- Agency users: membership lookups for RLS policies
+CREATE INDEX idx_agency_users_agency_id ON agency_users(agency_id);
+CREATE INDEX idx_agency_users_user_id ON agency_users(user_id);
 
 -- Rate limits: fast lookup per phone within time window
 CREATE INDEX idx_rate_limits_phone_window ON rate_limits(agency_id, phone, window_start);
@@ -176,8 +195,10 @@ CREATE INDEX idx_properties_embedding ON properties USING hnsw (embedding vector
 ## pgvector Setup
 
 ### Enable the extension
+Install into the `extensions` schema, not `public` — Supabase's security linter (`extension_in_public`) flags extensions installed in `public`.
+
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
 ```
 
 ### Semantic search function
@@ -207,6 +228,8 @@ RETURNS TABLE (
   similarity FLOAT
 )
 LANGUAGE SQL
+SECURITY INVOKER
+SET search_path = 'public, extensions'
 AS $$
   SELECT
     p.id,
@@ -221,18 +244,20 @@ AS $$
     p.description,
     p.parking,
     p.hoa_fees,
-    1 - (p.embedding <=> query_embedding) AS similarity
+    1 - (p.embedding OPERATOR(extensions.<=>) query_embedding) AS similarity
   FROM properties p
   WHERE
     p.agency_id = agency_id_filter
     AND p.operation = operation_filter
     AND p.available = TRUE
     AND p.embedding IS NOT NULL
-    AND 1 - (p.embedding <=> query_embedding) >= similarity_threshold
-  ORDER BY p.embedding <=> query_embedding
+    AND 1 - (p.embedding OPERATOR(extensions.<=>) query_embedding) >= similarity_threshold
+  ORDER BY p.embedding OPERATOR(extensions.<=>) query_embedding
   LIMIT match_count;
 $$;
 ```
+
+The `<=>` operator must be schema-qualified with `OPERATOR(extensions.<=>)`. `vector` now lives in the `extensions` schema (see above), and `LANGUAGE SQL` function bodies are parsed and validated at `CREATE FUNCTION` time using the ambient session `search_path` — the function's own `SET search_path` config only takes effect when the function is *called*, not while it's being created. Qualifying the operator explicitly avoids depending on whatever `search_path` the migration happens to run under.
 
 ---
 
@@ -242,29 +267,47 @@ RLS is enforced in the admin panel (Next.js + Supabase Auth). The backend bypass
 
 ### Admin panel policies (anon/authenticated role)
 
+`auth.uid()` is wrapped as `(select auth.uid())` in every policy below — Supabase's recommended pattern so it's evaluated once per statement instead of once per row. Every policy also specifies `TO authenticated` explicitly rather than relying on `auth.role()` checks (deprecated, and unsafe if anonymous sign-ins are ever enabled).
+
 ```sql
+-- agency_users: advisors can see their own membership row(s).
+-- Required first: every other policy below subqueries agency_users to
+-- resolve agency_id, and RLS on agency_users with no policy would
+-- silently blank out those subqueries for every other table.
+ALTER TABLE agency_users ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Advisors can view their own membership"
+  ON agency_users FOR SELECT
+  TO authenticated
+  USING ( user_id = (SELECT auth.uid()) );
+
 -- Agencies: advisors can only see their own agency
 ALTER TABLE agencies ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Advisors can view their own agency"
   ON agencies FOR SELECT
-  USING (auth.uid() IN (
-    SELECT user_id FROM agency_users WHERE agency_id = agencies.id
+  TO authenticated
+  USING ( id IN (
+    SELECT agency_id FROM agency_users WHERE user_id = (SELECT auth.uid())
   ));
 
--- Properties: advisors can only see their agency's properties
+-- Properties: advisors can see and manage their agency's properties.
+-- A single FOR ALL policy covers SELECT too — a separate SELECT policy
+-- with the same condition is redundant and costs an extra policy
+-- evaluation per query (Supabase linter: multiple_permissive_policies).
+-- FOR ALL requires WITH CHECK as well as USING: without it, an advisor
+-- could reassign agency_id on INSERT/UPDATE to move a row into another
+-- agency (BOLA/IDOR).
 ALTER TABLE properties ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Advisors can view their agency properties"
-  ON properties FOR SELECT
-  USING (agency_id IN (
-    SELECT agency_id FROM agency_users WHERE user_id = auth.uid()
-  ));
 
 CREATE POLICY "Advisors can manage their agency properties"
   ON properties FOR ALL
-  USING (agency_id IN (
-    SELECT agency_id FROM agency_users WHERE user_id = auth.uid()
+  TO authenticated
+  USING ( agency_id IN (
+    SELECT agency_id FROM agency_users WHERE user_id = (SELECT auth.uid())
+  ))
+  WITH CHECK ( agency_id IN (
+    SELECT agency_id FROM agency_users WHERE user_id = (SELECT auth.uid())
   ));
 
 -- Leads: advisors can only see their agency's leads
@@ -272,8 +315,9 @@ ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Advisors can view their agency leads"
   ON leads FOR SELECT
-  USING (agency_id IN (
-    SELECT agency_id FROM agency_users WHERE user_id = auth.uid()
+  TO authenticated
+  USING ( agency_id IN (
+    SELECT agency_id FROM agency_users WHERE user_id = (SELECT auth.uid())
   ));
 
 -- Conversations: advisors can only see their agency's conversations
@@ -281,9 +325,16 @@ ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Advisors can view their agency conversations"
   ON conversations FOR SELECT
-  USING (agency_id IN (
-    SELECT agency_id FROM agency_users WHERE user_id = auth.uid()
+  TO authenticated
+  USING ( agency_id IN (
+    SELECT agency_id FROM agency_users WHERE user_id = (SELECT auth.uid())
   ));
+
+-- Rate limits: internal bookkeeping table, not exposed to the admin
+-- panel. RLS is enabled with no policies — this is intentional
+-- deny-all for anon/authenticated. Only the backend's service_role
+-- key (which bypasses RLS) can read/write it.
+ALTER TABLE rate_limits ENABLE ROW LEVEL SECURITY;
 ```
 
 ---

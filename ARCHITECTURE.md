@@ -13,7 +13,7 @@ Agent Real Estate is a monorepo containing two applications:
 - **`apps/api`** — NestJS backend. Handles the WhatsApp webhook, runs the Claude AI agent, manages conversations, and interacts with the database.
 - **`apps/admin`** — Next.js frontend. Admin panel for advisors to manage properties and view leads.
 
-Both applications share a single Supabase project (PostgreSQL + pgvector + Auth).
+Both applications share a single Supabase project (PostgreSQL + pgvector + Auth), and consume the generated database types from **`packages/types`**.
 
 ---
 
@@ -205,6 +205,7 @@ src/
 ```
 agencies
   │
+  ├── agency_users (agency_id FK) ── auth.users (user_id FK)
   ├── properties (agency_id FK)
   ├── leads (agency_id FK)
   │     └── properties (property_id FK, optional)
@@ -218,12 +219,15 @@ agencies
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
 | `agencies` | Root tenant entity | `id`, `name`, `email` |
+| `agency_users` | Maps Supabase Auth users to their agency (drives admin panel RLS) | `agency_id`, `user_id` |
 | `properties` | Real estate listings | `agency_id`, `type`, `operation`, `price`, `zone`, `embedding` |
 | `leads` | Qualified prospects | `agency_id`, `phone`, `status`, `property_id` |
 | `conversations` | WhatsApp history | `agency_id`, `phone`, `messages` (JSONB), `message_count` |
 | `rate_limits` | Rate limiting state | `agency_id`, `phone`, `window_start`, `message_count` |
 
-Full schema definition is in `.agents/DB.md`.
+`pgvector` is installed in the `extensions` schema (not `public`), per Supabase's security linter recommendations.
+
+Full schema definition is in `.agents/DB.md`. Generated TypeScript types are in `packages/types/src/database.types.ts`.
 
 ---
 
