@@ -257,3 +257,18 @@ create policy "Advisors can view their agency conversations"
 -- panel. RLS is enabled with no policies, so anon/authenticated get
 -- no access; only the backend's service_role (which bypasses RLS)
 -- can read/write it.
+
+-- ============================================================
+-- Table grants
+-- Separate from RLS: RLS decides which ROWS are visible to a role
+-- that already has table access; without these GRANTs, Postgres
+-- rejects the query with "permission denied for table" before RLS
+-- is ever evaluated (service_role bypasses RLS, but still needs the
+-- underlying GRANT). `anon` is deliberately not granted — every
+-- policy above targets `authenticated` only, so anon has no path to
+-- any row regardless.
+-- ============================================================
+
+grant select, insert, update, delete on
+  agencies, agency_users, properties, leads, conversations, rate_limits
+  to authenticated, service_role;

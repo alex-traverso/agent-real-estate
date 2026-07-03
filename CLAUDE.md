@@ -135,6 +135,8 @@ Generated Supabase types live in `packages/types/src/database.types.ts` (via `mc
 ### Migrations
 Migrations are managed via Supabase CLI. Migration files live in `apps/api/supabase/migrations/`. Never modify the database schema directly from the Supabase dashboard without creating a corresponding migration file.
 
+**Every migration that creates a table must also `GRANT` it** to `authenticated`/`service_role` (and `anon` only if a policy actually targets it). RLS restricts *rows*, not table access — without the `GRANT`, even the backend's `service_role` client gets `permission denied for table`. See `.agents/DB.md` → "Table Grants".
+
 ---
 
 ## The Agent (Luca)

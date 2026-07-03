@@ -339,6 +339,33 @@ ALTER TABLE rate_limits ENABLE ROW LEVEL SECURITY;
 
 ---
 
+## Table Grants
+
+**RLS alone is not enough.** RLS decides which *rows* a role can see once it already has access to the *table*; without an explicit `GRANT`, Postgres rejects the query with `permission denied for table X` before any RLS policy is even evaluated. `service_role` bypassing RLS does **not** exempt it from this — it still needs the underlying `GRANT`.
+
+New tables created via raw CLI migrations (as opposed to the Supabase dashboard, which auto-applies default privileges on project creation) do **not** automatically get `SELECT/INSERT/UPDATE/DELETE` for `anon`/`authenticated`/`service_role`. Every migration that creates tables must explicitly grant them, or every query against that table — including from the backend's `service_role` client — will fail.
+
+```sql
+-- `anon` is deliberately not granted — every policy above targets
+-- `authenticated` only, so anon has no path to any row regardless,
+-- and granting it broader table access would be unnecessary surface.
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  agencies, agency_users, properties, leads, conversations, rate_limits
+  TO authenticated, service_role;
+```
+
+Verify with `mcp__supabase__execute_sql` after any migration that adds tables:
+
+```sql
+SELECT grantee, table_name, string_agg(privilege_type, ',') AS privs
+FROM information_schema.role_table_grants
+WHERE table_schema = 'public' AND grantee IN ('anon','authenticated','service_role')
+GROUP BY grantee, table_name
+ORDER BY table_name, grantee;
+```
+
+---
+
 ## Migration Workflow
 
 ```bash
