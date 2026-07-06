@@ -10,7 +10,9 @@ export class SupabaseService {
 
   constructor(configService: ConfigService) {
     const url = configService.get<string>('SUPABASE_URL');
-    const serviceRoleKey = configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+    const serviceRoleKey = configService.get<string>(
+      'SUPABASE_SERVICE_ROLE_KEY',
+    );
 
     if (!url || !serviceRoleKey) {
       throw new Error(
