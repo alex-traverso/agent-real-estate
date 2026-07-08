@@ -12,17 +12,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WebhookSignatureGuard } from './webhook.guard';
-import { isTextMessage } from './types/whatsapp-webhook.types';
-import type {
-  WhatsAppMessage,
-  WhatsAppWebhookPayload,
-} from './types/whatsapp-webhook.types';
+import { WebhookService } from './webhook.service';
+import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
 
 @Controller('webhook')
 export class WebhookController {
   private readonly logger = new Logger(WebhookController.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly webhookService: WebhookService,
+  ) {}
 
   /**
    * Meta webhook verification handshake. Meta calls this once when the
@@ -49,66 +49,16 @@ export class WebhookController {
   }
 
   /**
-   * Inbound WhatsApp events. The signature is validated by the guard
-   * before this runs. Always returns 200 so Meta does not retry — any
-   * processing error is swallowed and logged, never surfaced to Meta.
-   * Actual message handling (conversation -> agent) is not built yet.
+   * Inbound WhatsApp events. The signature is validated by the guard before
+   * this runs. Handling is delegated to WebhookService as fire-and-forget so
+   * Meta always gets a fast 200 and never retries (any processing error is
+   * swallowed and logged there, never surfaced to Meta).
    */
   @Post()
   @HttpCode(HttpStatus.OK)
   @UseGuards(WebhookSignatureGuard)
   receive(@Body() payload: WhatsAppWebhookPayload): { status: string } {
-    try {
-      for (const message of this.extractMessages(payload)) {
-        this.logMessage(message);
-      }
-    } catch (error) {
-      this.logger.error(
-        `[WebhookController] Failed to process webhook payload | error: ${
-          error instanceof Error ? error.message : 'unknown'
-        }`,
-      );
-    }
-
-    // TODO(conversation/agent): load/create conversation, run Luca, reply.
+    this.webhookService.handleInbound(payload);
     return { status: 'ok' };
-  }
-
-  private extractMessages(payload: WhatsAppWebhookPayload): WhatsAppMessage[] {
-    const messages: WhatsAppMessage[] = [];
-    for (const entry of payload?.entry ?? []) {
-      for (const change of entry?.changes ?? []) {
-        for (const message of change?.value?.messages ?? []) {
-          messages.push(message);
-        }
-      }
-    }
-    return messages;
-  }
-
-  private logMessage(message: WhatsAppMessage): void {
-    // Safe in every environment: masked phone + message id/type only.
-    this.logger.log(
-      `[WebhookController] Message received | from: ${this.maskPhone(
-        message.from,
-      )} | id: ${message.id} | type: ${message.type}`,
-    );
-
-    // Dev-only: show the full sender and body so the Meta connection can
-    // be verified locally. Never emitted in production (SECURITY.md).
-    if (process.env.NODE_ENV !== 'production') {
-      const body = isTextMessage(message) ? message.text.body : '(non-text)';
-      this.logger.debug(
-        `[WebhookController] (dev) from: ${message.from} | body: ${body}`,
-      );
-    }
-  }
-
-  private maskPhone(phone: string): string {
-    if (!phone) {
-      return 'unknown';
-    }
-    const last4 = phone.slice(-4);
-    return `***${last4}`;
   }
 }

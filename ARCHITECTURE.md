@@ -100,9 +100,15 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
          ↓
 10. ConversationService saves updated history to Supabase
           ↓
-11. WebhookService sends response to client via Meta Cloud API
+11. WebhookService calls WhatsAppService (messaging module) to send the
+    response to the client via Meta Cloud API
           ↓
 12. Return HTTP 200 to Meta
+
+> **Current state:** steps 6–10 (conversation + agent) are not built yet.
+> The webhook receives and verifies messages, then WebhookService replies to
+> any inbound text with a fixed Spanish placeholder ("Luca in development")
+> via WhatsAppService. This is the interim behavior until the agent is wired.
 ```
 
 ---
@@ -117,8 +123,14 @@ src/
 ├── webhook/
 │   ├── webhook.module.ts
 │   ├── webhook.controller.ts       # POST /webhook (Meta verification + messages)
-│   ├── webhook.service.ts          # Sends messages back via Meta Cloud API
+│   ├── webhook.service.ts          # Inbound orchestration (extract, log, trigger reply)
+│   ├── webhook.constants.ts        # Placeholder reply text (interim, until agent)
 │   └── webhook.guard.ts            # Validates X-Hub-Signature-256
+│
+├── messaging/
+│   ├── messaging.module.ts
+│   ├── messaging.constants.ts      # Graph API base URL + pinned version
+│   └── whatsapp.service.ts         # Sends messages via Meta Cloud API (reusable)
 │
 ├── agent/
 │   ├── agent.module.ts
