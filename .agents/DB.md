@@ -49,9 +49,12 @@ CREATE TABLE agencies (
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   phone TEXT,
+  whatsapp_phone_number_id TEXT UNIQUE, -- Meta Cloud API phone_number_id; maps an inbound webhook to its tenant
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ```
+
+`whatsapp_phone_number_id` was added in migration `20260707120000_add_agency_whatsapp_phone_number_id`. The webhook payload carries `metadata.phone_number_id`; the backend resolves it to `agency_id` via this column. `UNIQUE` enforces one agency per number and indexes the lookup.
 
 #### `agency_users`
 Join table between Supabase Auth users and agencies. Required by the RLS policies below to resolve `auth.uid()` → `agency_id` for the admin panel — without it, those policies have no way to determine which agency the requesting advisor belongs to.

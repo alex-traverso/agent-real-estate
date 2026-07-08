@@ -1,13 +1,38 @@
 import { WebhookService } from './webhook.service';
 import { PLACEHOLDER_REPLY_ES } from './webhook.constants';
 import type { WhatsAppService } from '../messaging/whatsapp.service';
+import type { AgencyService } from '../agency/agency.service';
+import type { ConversationService } from '../conversation/conversation.service';
 import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
 
-function createService(
-  sendText: jest.Mock = jest.fn().mockResolvedValue('wamid.OUT'),
-) {
+const CONVERSATION = { id: 'conv-1', agency_id: 'agency-1', message_count: 0 };
+
+function createService(opts: { agencyId?: string | null } = {}) {
+  const sendText = jest.fn().mockResolvedValue('wamid.OUT');
+  const resolveIdByPhoneNumberId = jest
+    .fn()
+    .mockResolvedValue(
+      opts.agencyId === undefined ? 'agency-1' : opts.agencyId,
+    );
+  const getOrCreateActive = jest.fn().mockResolvedValue(CONVERSATION);
+  const appendMessages = jest.fn().mockResolvedValue(CONVERSATION);
+
   const whatsapp = { sendText } as unknown as WhatsAppService;
-  return { service: new WebhookService(whatsapp), sendText };
+  const agencyService = {
+    resolveIdByPhoneNumberId,
+  } as unknown as AgencyService;
+  const conversationService = {
+    getOrCreateActive,
+    appendMessages,
+  } as unknown as ConversationService;
+
+  return {
+    service: new WebhookService(whatsapp, agencyService, conversationService),
+    sendText,
+    resolveIdByPhoneNumberId,
+    getOrCreateActive,
+    appendMessages,
+  };
 }
 
 function textPayload(body = 'Hola', type = 'text'): WhatsAppWebhookPayload {
@@ -73,52 +98,84 @@ const statusPayload: WhatsAppWebhookPayload = {
 
 describe('WebhookService', () => {
   describe('processInbound', () => {
-    it('replies to a text message with the placeholder', async () => {
-      const { service, sendText } = createService();
+    it('resolves tenant, persists inbound + reply, and sends the placeholder', async () => {
+      const {
+        service,
+        sendText,
+        resolveIdByPhoneNumberId,
+        getOrCreateActive,
+        appendMessages,
+      } = createService();
+
       await service.processInbound(textPayload());
 
-      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(resolveIdByPhoneNumberId).toHaveBeenCalledWith('pnid-123');
+      expect(getOrCreateActive).toHaveBeenCalledWith(
+        'agency-1',
+        '5491122223333',
+      );
       expect(sendText).toHaveBeenCalledWith(
         '5491122223333',
         PLACEHOLDER_REPLY_ES,
       );
+
+      expect(appendMessages).toHaveBeenCalledTimes(2);
+      expect(appendMessages).toHaveBeenNthCalledWith(1, expect.anything(), [
+        expect.objectContaining({
+          role: 'user',
+          content: 'Hola',
+          whatsapp_message_id: 'wamid.ABC',
+        }),
+      ]);
+      expect(appendMessages).toHaveBeenNthCalledWith(2, expect.anything(), [
+        expect.objectContaining({
+          role: 'assistant',
+          content: PLACEHOLDER_REPLY_ES,
+        }),
+      ]);
     });
 
-    it('does not reply to a status-only payload (no reply storm)', async () => {
-      const { service, sendText } = createService();
-      await service.processInbound(statusPayload);
+    it('does not send or persist when the tenant cannot be resolved', async () => {
+      const { service, sendText, getOrCreateActive, appendMessages } =
+        createService({ agencyId: null });
+
+      await service.processInbound(textPayload());
+
+      expect(getOrCreateActive).not.toHaveBeenCalled();
+      expect(appendMessages).not.toHaveBeenCalled();
       expect(sendText).not.toHaveBeenCalled();
     });
 
-    it('does not reply to a non-text message', async () => {
-      const { service, sendText } = createService();
+    it('ignores status-only payloads (no reply storm)', async () => {
+      const { service, sendText, resolveIdByPhoneNumberId } = createService();
+      await service.processInbound(statusPayload);
+      expect(resolveIdByPhoneNumberId).not.toHaveBeenCalled();
+      expect(sendText).not.toHaveBeenCalled();
+    });
+
+    it('ignores non-text messages', async () => {
+      const { service, sendText, getOrCreateActive } = createService();
       await service.processInbound(textPayload('', 'image'));
+      expect(getOrCreateActive).not.toHaveBeenCalled();
       expect(sendText).not.toHaveBeenCalled();
     });
 
     it('does not throw on a malformed payload', async () => {
-      const { service, sendText } = createService();
+      const { service } = createService();
       await expect(
         service.processInbound({} as WhatsAppWebhookPayload),
       ).resolves.toBeUndefined();
-      expect(sendText).not.toHaveBeenCalled();
     });
   });
 
   describe('handleInbound (fire-and-forget)', () => {
-    it('returns void synchronously without throwing', () => {
-      const { service } = createService();
-      expect(service.handleInbound(textPayload())).toBeUndefined();
-    });
-
-    it('swallows send failures without throwing', async () => {
-      const sendText = jest.fn().mockRejectedValue(new Error('Meta down'));
-      const { service } = createService(sendText);
+    it('swallows downstream failures without throwing', async () => {
+      const { service, getOrCreateActive } = createService();
+      getOrCreateActive.mockRejectedValueOnce(new Error('db down'));
 
       expect(() => service.handleInbound(textPayload())).not.toThrow();
-      // Let the fire-and-forget promise (and its .catch) settle.
       await new Promise((resolve) => setImmediate(resolve));
-      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(getOrCreateActive).toHaveBeenCalledTimes(1);
     });
   });
 });
