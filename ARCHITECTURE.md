@@ -13,7 +13,7 @@ Agent Real Estate is a monorepo containing two applications:
 - **`apps/api`** — NestJS backend. Handles the WhatsApp webhook, runs the Claude AI agent, manages conversations, and interacts with the database.
 - **`apps/admin`** — Next.js frontend. Admin panel for advisors to manage properties and view leads.
 
-Both applications share a single Supabase project (PostgreSQL + pgvector + Auth).
+Both applications share a single Supabase project (PostgreSQL + pgvector + Auth), and consume the generated database types from **`packages/types`**.
 
 ---
 
@@ -100,9 +100,15 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
          ↓
 10. ConversationService saves updated history to Supabase
           ↓
-11. WebhookService sends response to client via Meta Cloud API
+11. WebhookService calls WhatsAppService (messaging module) to send the
+    response to the client via Meta Cloud API
           ↓
 12. Return HTTP 200 to Meta
+
+> **Current state:** steps 6–10 (conversation + agent) are not built yet.
+> The webhook receives and verifies messages, then WebhookService replies to
+> any inbound text with a fixed Spanish placeholder ("Luca in development")
+> via WhatsAppService. This is the interim behavior until the agent is wired.
 ```
 
 ---
@@ -117,8 +123,14 @@ src/
 ├── webhook/
 │   ├── webhook.module.ts
 │   ├── webhook.controller.ts       # POST /webhook (Meta verification + messages)
-│   ├── webhook.service.ts          # Sends messages back via Meta Cloud API
+│   ├── webhook.service.ts          # Inbound orchestration (extract, log, trigger reply)
+│   ├── webhook.constants.ts        # Placeholder reply text (interim, until agent)
 │   └── webhook.guard.ts            # Validates X-Hub-Signature-256
+│
+├── messaging/
+│   ├── messaging.module.ts
+│   ├── messaging.constants.ts      # Graph API base URL + pinned version
+│   └── whatsapp.service.ts         # Sends messages via Meta Cloud API (reusable)
 │
 ├── agent/
 │   ├── agent.module.ts
@@ -205,6 +217,7 @@ src/
 ```
 agencies
   │
+  ├── agency_users (agency_id FK) ── auth.users (user_id FK)
   ├── properties (agency_id FK)
   ├── leads (agency_id FK)
   │     └── properties (property_id FK, optional)
@@ -218,12 +231,15 @@ agencies
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
 | `agencies` | Root tenant entity | `id`, `name`, `email` |
+| `agency_users` | Maps Supabase Auth users to their agency (drives admin panel RLS) | `agency_id`, `user_id` |
 | `properties` | Real estate listings | `agency_id`, `type`, `operation`, `price`, `zone`, `embedding` |
 | `leads` | Qualified prospects | `agency_id`, `phone`, `status`, `property_id` |
 | `conversations` | WhatsApp history | `agency_id`, `phone`, `messages` (JSONB), `message_count` |
 | `rate_limits` | Rate limiting state | `agency_id`, `phone`, `window_start`, `message_count` |
 
-Full schema definition is in `.agents/DB.md`.
+`pgvector` is installed in the `extensions` schema (not `public`), per Supabase's security linter recommendations.
+
+Full schema definition is in `.agents/DB.md`. Generated TypeScript types are in `packages/types/src/database.types.ts`.
 
 ---
 
