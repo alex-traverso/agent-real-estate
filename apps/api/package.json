@@ -22,6 +22,7 @@
     "search:smoke": "ts-node -r tsconfig-paths/register supabase/search.smoke.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
