@@ -1,25 +1,34 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { WhatsAppService } from '../messaging/whatsapp.service';
+import { AgencyService } from '../agency/agency.service';
+import { ConversationService } from '../conversation/conversation.service';
+import type { StoredMessage } from '../conversation/types/stored-message.type';
 import { PLACEHOLDER_REPLY_ES } from './webhook.constants';
 import { isTextMessage } from './types/whatsapp-webhook.types';
 import type {
   WhatsAppMessage,
+  WhatsAppTextMessage,
   WhatsAppWebhookPayload,
 } from './types/whatsapp-webhook.types';
 
 /**
- * Orchestrates inbound WhatsApp webhook events: extracts messages, logs them,
- * and (for now) replies to text messages with a fixed placeholder. This is the
- * seam where conversation loading and the agent will plug in later.
+ * Orchestrates inbound WhatsApp webhook events: resolves the tenant, loads or
+ * creates the conversation, persists the exchange, and replies. For now the
+ * reply is a fixed placeholder; the agent will plug in where the reply text is
+ * produced.
  */
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
 
-  constructor(private readonly whatsapp: WhatsAppService) {}
+  constructor(
+    private readonly whatsapp: WhatsAppService,
+    private readonly agencyService: AgencyService,
+    private readonly conversationService: ConversationService,
+  ) {}
 
   /**
-   * Fire-and-forget entry point used by the controller. The reply is dispatched
+   * Fire-and-forget entry point used by the controller. The work is dispatched
    * but not awaited so Meta gets a fast 200 (a slow/non-200 response makes Meta
    * retry the same event, causing duplicate replies). The attached .catch is
    * mandatory: an unhandled promise rejection can crash the Node process.
@@ -35,35 +44,82 @@ export class WebhookService {
   }
 
   /**
-   * Awaitable core of the inbound handling. Only text messages get a reply;
-   * status webhooks (delivery/read) carry `statuses`, not `messages`, so they
-   * yield nothing here — this is what prevents a reply storm where our own
-   * outbound receipts would re-trigger a send.
+   * Awaitable core. Iterates per change so each message keeps its
+   * `metadata.phone_number_id` (used to resolve the tenant). Only text messages
+   * are answered; status webhooks (delivery/read) carry `statuses`, not
+   * `messages`, so they yield nothing here — the reply-storm guard.
    */
   async processInbound(payload: WhatsAppWebhookPayload): Promise<void> {
-    for (const message of this.extractMessages(payload)) {
-      this.logMessage(message);
+    // console.log(`Full Payload: `, JSON.stringify(payload, null, 2));
 
-      // TODO(idempotency): dedup on message.id — Meta retries can redeliver
-      // the same message once conversation persistence lands.
-      if (!isTextMessage(message)) {
-        continue; // images/audio/location/interactive: no reply in this step
-      }
-
-      await this.whatsapp.sendText(message.from, PLACEHOLDER_REPLY_ES);
-    }
-  }
-
-  private extractMessages(payload: WhatsAppWebhookPayload): WhatsAppMessage[] {
-    const messages: WhatsAppMessage[] = [];
     for (const entry of payload?.entry ?? []) {
       for (const change of entry?.changes ?? []) {
-        for (const message of change?.value?.messages ?? []) {
-          messages.push(message);
+        const value = change?.value;
+        const phoneNumberId = value?.metadata?.phone_number_id;
+
+        for (const message of value?.messages ?? []) {
+          this.logMessage(message);
+
+          // TODO(idempotency): dedup on message.id — Meta retries can redeliver
+          // the same message.
+          if (!isTextMessage(message)) {
+            continue; // images/audio/location/interactive: no reply in this step
+          }
+
+          if (!phoneNumberId) {
+            this.logger.warn(
+              '[WebhookService] Message without phone_number_id | skipping',
+            );
+            continue;
+          }
+
+          const agencyId =
+            await this.agencyService.resolveIdByPhoneNumberId(phoneNumberId);
+          if (!agencyId) {
+            continue; // unattributable — AgencyService already logged it
+          }
+
+          await this.replyAndPersist(agencyId, message);
         }
       }
     }
-    return messages;
+  }
+
+  /**
+   * Persists the inbound message, sends the reply, and persists the reply.
+   * The inbound message is saved before sending, so it is not lost if the send
+   * fails. The 50-message cap / escalation (ARCHITECTURE step 7) is not built
+   * yet — see MAX_MESSAGES.
+   */
+  private async replyAndPersist(
+    agencyId: string,
+    message: WhatsAppTextMessage,
+  ): Promise<void> {
+    let conversation = await this.conversationService.getOrCreateActive(
+      agencyId,
+      message.from,
+    );
+
+    const userMessage: StoredMessage = {
+      role: 'user',
+      content: message.text.body,
+      timestamp: new Date().toISOString(),
+      whatsapp_message_id: message.id,
+    };
+    conversation = await this.conversationService.appendMessages(conversation, [
+      userMessage,
+    ]);
+
+    await this.whatsapp.sendText(message.from, PLACEHOLDER_REPLY_ES);
+
+    const assistantMessage: StoredMessage = {
+      role: 'assistant',
+      content: PLACEHOLDER_REPLY_ES,
+      timestamp: new Date().toISOString(),
+    };
+    await this.conversationService.appendMessages(conversation, [
+      assistantMessage,
+    ]);
   }
 
   private logMessage(message: WhatsAppMessage): void {

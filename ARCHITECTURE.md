@@ -105,10 +105,15 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
           ↓
 12. Return HTTP 200 to Meta
 
-> **Current state:** steps 6–10 (conversation + agent) are not built yet.
-> The webhook receives and verifies messages, then WebhookService replies to
-> any inbound text with a fixed Spanish placeholder ("Luca in development")
-> via WhatsAppService. This is the interim behavior until the agent is wired.
+> **Current state:** the agent (step 8+) is not built yet. The webhook
+> receives and verifies messages, resolves the tenant from
+> `metadata.phone_number_id` (→ `agencies.whatsapp_phone_number_id`, via
+> AgencyService), loads/creates the conversation (ConversationService, 8h
+> session timeout) and persists the exchange, then replies to any inbound text
+> with a fixed Spanish placeholder ("Luca in development") via WhatsAppService.
+> The reply text is the seam where the agent will plug in. History is stored in
+> `conversations.messages` as Claude-shaped `{ role, content }` (+ timestamp,
+> whatsapp_message_id). The 50-message cap/escalation is not enforced yet.
 ```
 
 ---
@@ -131,6 +136,16 @@ src/
 │   ├── messaging.module.ts
 │   ├── messaging.constants.ts      # Graph API base URL + pinned version
 │   └── whatsapp.service.ts         # Sends messages via Meta Cloud API (reusable)
+│
+├── agency/
+│   ├── agency.module.ts
+│   └── agency.service.ts           # Resolves phone_number_id → agency_id (cached)
+│
+├── conversation/
+│   ├── conversation.module.ts
+│   ├── conversation.constants.ts   # Session timeout (8h), message cap (50)
+│   ├── conversation.service.ts     # Load/create + append history (per agency_id)
+│   └── types/stored-message.type.ts
 │
 ├── agent/
 │   ├── agent.module.ts

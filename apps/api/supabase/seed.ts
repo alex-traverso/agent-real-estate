@@ -46,6 +46,9 @@ const DEMO_AGENCY: TablesInsert<'agencies'> = {
   name: 'Inmobiliaria Demo',
   email: 'demo@agentrealestate.test',
   phone: '+541112345678',
+  // Links the demo agency to the WhatsApp business number so the backend can
+  // resolve inbound messages (metadata.phone_number_id) to this tenant.
+  whatsapp_phone_number_id: process.env.META_PHONE_NUMBER_ID ?? null,
 };
 
 type SeedProperty = Omit<TablesInsert<'properties'>, 'agency_id' | 'embedding'>;
