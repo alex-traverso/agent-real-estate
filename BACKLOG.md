@@ -100,7 +100,7 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] `EmbeddingsService` — OpenAI `text-embedding-3-small` integration for generating embeddings
 - [x] `PropertiesService.searchByFilters` — structured search (zone, price, rooms, operation, type), always filtered by `agency_id`
 - [x] `PropertiesService.searchByAddress` — exact/near-exact address lookup
-- [ ] Semantic search: `EmbeddingsService` → `search_properties_semantic` RPC → ranked results
+- [x] Semantic search: `EmbeddingsService` → `search_properties_semantic` RPC → ranked results
 - [ ] Tool definitions created in `apps/api/src/agent/tools/`:
   - [ ] `search-properties-by-filters.tool.ts`
   - [ ] `search-properties-semantic.tool.ts`

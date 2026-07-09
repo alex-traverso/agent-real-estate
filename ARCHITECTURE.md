@@ -114,6 +114,14 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 > The reply text is the seam where the agent will plug in. History is stored in
 > `conversations.messages` as Claude-shaped `{ role, content }` (+ timestamp,
 > whatsapp_message_id). The 50-message cap/escalation is not enforced yet.
+>
+> The agent's **search foundations** (step 9) are implemented as agent-facing
+> services: `EmbeddingsService.generateEmbedding` (OpenAI) and
+> `PropertiesService.searchByFilters` / `searchByAddress` / `searchSemantic`
+> (the last via the `search_properties_semantic` pgvector RPC), each scoped by
+> `agency_id`. The `agent/tools/*.ts` definitions that expose them to Claude are
+> deferred to the agent itself (step 8), and the admin-facing `PropertiesController`
+> to the admin panel.
 ```
 
 ---
