@@ -13,6 +13,7 @@ import { SupabaseService } from '../common/supabase/supabase.service';
 export class AgencyService {
   private readonly logger = new Logger(AgencyService.name);
   private readonly cache = new Map<string, string>();
+  private readonly emailCache = new Map<string, string>();
 
   constructor(private readonly supabase: SupabaseService) {}
 
@@ -51,5 +52,40 @@ export class AgencyService {
 
     this.cache.set(phoneNumberId, data.id);
     return data.id;
+  }
+
+  /**
+   * Returns the agency's contact email — the advisor address notified on
+   * escalation — or `null` if the agency has none or cannot be found. Cached
+   * in-process like the phone-number resolution, since it rarely changes.
+   */
+  async getContactEmail(agencyId: string): Promise<string | null> {
+    const cached = this.emailCache.get(agencyId);
+    if (cached) {
+      return cached;
+    }
+
+    const { data, error } = await this.supabase.client
+      .from('agencies')
+      .select('email')
+      .eq('id', agencyId)
+      .maybeSingle();
+
+    if (error) {
+      this.logger.error(
+        `[AgencyService] Failed to load agency email | agencyId: ${agencyId} | error: ${error.message}`,
+      );
+      return null;
+    }
+
+    if (!data?.email) {
+      this.logger.error(
+        `[AgencyService] No contact email registered for agency: ${agencyId}`,
+      );
+      return null;
+    }
+
+    this.emailCache.set(agencyId, data.email);
+    return data.email;
   }
 }
