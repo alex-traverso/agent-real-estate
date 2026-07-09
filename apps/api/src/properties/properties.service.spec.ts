@@ -1,16 +1,18 @@
 import { Logger } from '@nestjs/common';
 import { PropertiesService } from './properties.service';
 import type { SupabaseService } from '../common/supabase/supabase.service';
+import type { EmbeddingsService } from '../embeddings/embeddings.service';
 
 type Result = { data: unknown; error: { message: string } | null };
 
 /**
- * Chainable Supabase client mock: every builder method returns the same
- * builder. Unlike the conversation mock, these queries are awaited directly
- * (list results, no `.single()`), so the builder is thenable and resolves the
- * next queued result.
+ * Builds a PropertiesService over mocks. The Supabase client mock is chainable:
+ * every builder method returns the same builder. Structured queries are awaited
+ * directly (list results, no `.single()`), so the builder is thenable and
+ * resolves the next queued result; `rpc` (semantic search) resolves it too.
+ * EmbeddingsService is mocked to return a fixed vector.
  */
-function makeClient(results: Result[]) {
+function makeService(results: Result[], vector: number[] = [0.1, 0.2, 0.3]) {
   const builder: Record<string, jest.Mock> & { then?: unknown } = {};
   for (const method of ['select', 'eq', 'ilike', 'order', 'limit', 'lte']) {
     builder[method] = jest.fn(() => builder);
@@ -19,8 +21,18 @@ function makeClient(results: Result[]) {
     resolve(results.shift() ?? { data: [], error: null });
 
   const from = jest.fn(() => builder);
-  const supabase = { client: { from } } as unknown as SupabaseService;
-  return { supabase, builder, from };
+  const rpc = jest.fn(() =>
+    Promise.resolve(results.shift() ?? { data: [], error: null }),
+  );
+  const supabase = {
+    client: { from, rpc },
+  } as unknown as SupabaseService;
+
+  const generateEmbedding = jest.fn().mockResolvedValue(vector);
+  const embeddings = { generateEmbedding } as unknown as EmbeddingsService;
+
+  const service = new PropertiesService(supabase, embeddings);
+  return { service, builder, from, rpc, generateEmbedding };
 }
 
 function propertyRow(overrides: Record<string, unknown> = {}) {
@@ -45,10 +57,9 @@ describe('PropertiesService', () => {
   describe('searchByFilters', () => {
     it('always scopes by agency_id + available and returns rows', async () => {
       const rows = [propertyRow()];
-      const { supabase, builder, from } = makeClient([
+      const { service, builder, from } = makeService([
         { data: rows, error: null },
       ]);
-      const service = new PropertiesService(supabase);
 
       const result = await service.searchByFilters('agency-1', {});
 
@@ -61,8 +72,7 @@ describe('PropertiesService', () => {
     });
 
     it('applies each optional filter only when present', async () => {
-      const { supabase, builder } = makeClient([{ data: [], error: null }]);
-      const service = new PropertiesService(supabase);
+      const { service, builder } = makeService([{ data: [], error: null }]);
 
       await service.searchByFilters('agency-1', {
         operation: 'rent',
@@ -78,8 +88,7 @@ describe('PropertiesService', () => {
     });
 
     it('does not apply absent filters', async () => {
-      const { supabase, builder } = makeClient([{ data: [], error: null }]);
-      const service = new PropertiesService(supabase);
+      const { service, builder } = makeService([{ data: [], error: null }]);
 
       await service.searchByFilters('agency-1', {});
 
@@ -93,8 +102,7 @@ describe('PropertiesService', () => {
     });
 
     it('applies the price filter only when both maxPrice and currency are given', async () => {
-      const { supabase, builder } = makeClient([{ data: [], error: null }]);
-      const service = new PropertiesService(supabase);
+      const { service, builder } = makeService([{ data: [], error: null }]);
 
       await service.searchByFilters('agency-1', {
         maxPrice: 200000,
@@ -106,8 +114,7 @@ describe('PropertiesService', () => {
     });
 
     it('skips the price filter when currency is missing', async () => {
-      const { supabase, builder } = makeClient([{ data: [], error: null }]);
-      const service = new PropertiesService(supabase);
+      const { service, builder } = makeService([{ data: [], error: null }]);
 
       await service.searchByFilters('agency-1', { maxPrice: 200000 });
 
@@ -119,8 +126,7 @@ describe('PropertiesService', () => {
     });
 
     it('returns an empty array when there are no matches', async () => {
-      const { supabase } = makeClient([{ data: [], error: null }]);
-      const service = new PropertiesService(supabase);
+      const { service } = makeService([{ data: [], error: null }]);
 
       await expect(service.searchByFilters('agency-1', {})).resolves.toEqual(
         [],
@@ -129,10 +135,9 @@ describe('PropertiesService', () => {
 
     it('throws a generic error when the query fails', async () => {
       jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-      const { supabase } = makeClient([
+      const { service } = makeService([
         { data: null, error: { message: 'db down' } },
       ]);
-      const service = new PropertiesService(supabase);
 
       await expect(service.searchByFilters('agency-1', {})).rejects.toThrow(
         'Failed to search properties',
@@ -143,8 +148,7 @@ describe('PropertiesService', () => {
   describe('searchByAddress', () => {
     it('matches on partial address scoped by agency_id + available', async () => {
       const rows = [propertyRow()];
-      const { supabase, builder } = makeClient([{ data: rows, error: null }]);
-      const service = new PropertiesService(supabase);
+      const { service, builder } = makeService([{ data: rows, error: null }]);
 
       const result = await service.searchByAddress('agency-1', 'Santa Fe');
 
@@ -156,8 +160,7 @@ describe('PropertiesService', () => {
     });
 
     it('narrows by zone when provided', async () => {
-      const { supabase, builder } = makeClient([{ data: [], error: null }]);
-      const service = new PropertiesService(supabase);
+      const { service, builder } = makeService([{ data: [], error: null }]);
 
       await service.searchByAddress('agency-1', 'Santa Fe', 'Palermo');
 
@@ -166,8 +169,7 @@ describe('PropertiesService', () => {
     });
 
     it('returns an empty array on no match', async () => {
-      const { supabase } = makeClient([{ data: [], error: null }]);
-      const service = new PropertiesService(supabase);
+      const { service } = makeService([{ data: [], error: null }]);
 
       await expect(
         service.searchByAddress('agency-1', 'Nowhere'),
@@ -176,13 +178,73 @@ describe('PropertiesService', () => {
 
     it('throws a generic error when the query fails', async () => {
       jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-      const { supabase } = makeClient([
+      const { service } = makeService([
         { data: null, error: { message: 'db down' } },
       ]);
-      const service = new PropertiesService(supabase);
 
       await expect(
         service.searchByAddress('agency-1', 'Santa Fe'),
+      ).rejects.toThrow('Failed to search properties');
+    });
+  });
+
+  describe('searchSemantic', () => {
+    it('embeds the query and calls the RPC with tenant, operation and count', async () => {
+      const rows = [{ ...propertyRow(), similarity: 0.91 }];
+      const { service, rpc, generateEmbedding } = makeService([
+        { data: rows, error: null },
+      ]);
+
+      const result = await service.searchSemantic(
+        'agency-1',
+        'algo tranquilo con jardín',
+        'sale',
+      );
+
+      expect(result).toEqual(rows);
+      expect(generateEmbedding).toHaveBeenCalledWith(
+        'algo tranquilo con jardín',
+      );
+      expect(rpc).toHaveBeenCalledWith('search_properties_semantic', {
+        query_embedding: '[0.1,0.2,0.3]',
+        agency_id_filter: 'agency-1',
+        operation_filter: 'sale',
+        match_count: 5,
+        similarity_threshold: 0.25,
+      });
+    });
+
+    it('forwards custom matchCount and minSimilarity', async () => {
+      const { service, rpc } = makeService([{ data: [], error: null }]);
+
+      await service.searchSemantic('agency-1', 'monoambiente', 'rent', 3, 0.4);
+
+      expect(rpc).toHaveBeenCalledWith(
+        'search_properties_semantic',
+        expect.objectContaining({
+          operation_filter: 'rent',
+          match_count: 3,
+          similarity_threshold: 0.4,
+        }),
+      );
+    });
+
+    it('returns an empty array when there are no matches', async () => {
+      const { service } = makeService([{ data: [], error: null }]);
+
+      await expect(
+        service.searchSemantic('agency-1', 'x', 'sale'),
+      ).resolves.toEqual([]);
+    });
+
+    it('throws a generic error when the RPC fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { service } = makeService([
+        { data: null, error: { message: 'rpc down' } },
+      ]);
+
+      await expect(
+        service.searchSemantic('agency-1', 'x', 'sale'),
       ).rejects.toThrow('Failed to search properties');
     });
   });
