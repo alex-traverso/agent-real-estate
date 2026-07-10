@@ -93,6 +93,28 @@ export class ConversationService {
     return data;
   }
 
+  /**
+   * Marks a conversation as escalated (the 50-message cap was hit, or the
+   * agent handed off to a human). Best-effort: the escalation itself (lead
+   * saved, advisor notified) already happened, so a failure to flip this
+   * status must not be treated as a failure of the escalation. The next
+   * message from this phone starts a fresh conversation, since
+   * `getOrCreateActive` only matches `status = 'active'`.
+   */
+  async markEscalated(conversationId: string, agencyId: string): Promise<void> {
+    const { error } = await this.supabase.client
+      .from('conversations')
+      .update({ status: 'escalated', updated_at: new Date().toISOString() })
+      .eq('id', conversationId)
+      .eq('agency_id', agencyId);
+
+    if (error) {
+      this.logger.warn(
+        `[ConversationService] Failed to mark conversation as escalated | conversationId: ${conversationId} | error: ${error.message}`,
+      );
+    }
+  }
+
   private async create(agencyId: string, phone: string): Promise<Conversation> {
     const { data, error } = await this.supabase.client
       .from('conversations')

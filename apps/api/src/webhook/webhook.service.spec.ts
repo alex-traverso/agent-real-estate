@@ -1,22 +1,36 @@
 import { WebhookService } from './webhook.service';
-import { FALLBACK_REPLY_ES, RATE_LIMIT_REPLY_ES } from './webhook.constants';
+import {
+  FALLBACK_REPLY_ES,
+  MESSAGE_CAP_REPLY_ES,
+  RATE_LIMIT_REPLY_ES,
+} from './webhook.constants';
+import { MAX_MESSAGES } from '../conversation/conversation.constants';
 import type { WhatsAppService } from '../messaging/whatsapp.service';
 import type { AgencyService } from '../agency/agency.service';
 import type { ConversationService } from '../conversation/conversation.service';
 import type { AgentService } from '../agent/agent.service';
 import type { RateLimitService } from '../rate-limit/rate-limit.service';
+import type { EscalationService } from '../escalation/escalation.service';
 import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
 
 const AGENT_REPLY = 'Hola, soy Luca. ¿Buscás alquilar o comprar?';
-const CONVERSATION = {
-  id: 'conv-1',
-  agency_id: 'agency-1',
-  message_count: 0,
-  messages: [],
-};
+
+function conversation(messageCount = 0) {
+  return {
+    id: 'conv-1',
+    agency_id: 'agency-1',
+    message_count: messageCount,
+    messages: [],
+  };
+}
 
 function createService(
-  opts: { agencyId?: string | null; rateLimitAllowed?: boolean } = {},
+  opts: {
+    agencyId?: string | null;
+    rateLimitAllowed?: boolean;
+    messageCount?: number;
+    escalateFails?: boolean;
+  } = {},
 ) {
   const sendText = jest.fn().mockResolvedValue('wamid.OUT');
   const resolveIdByPhoneNumberId = jest
@@ -24,12 +38,17 @@ function createService(
     .mockResolvedValue(
       opts.agencyId === undefined ? 'agency-1' : opts.agencyId,
     );
+  const CONVERSATION = conversation(opts.messageCount ?? 0);
   const getOrCreateActive = jest.fn().mockResolvedValue(CONVERSATION);
   const appendMessages = jest.fn().mockResolvedValue(CONVERSATION);
+  const markEscalated = jest.fn().mockResolvedValue(undefined);
   const processMessage = jest.fn().mockResolvedValue(AGENT_REPLY);
   const checkAndIncrement = jest
     .fn()
     .mockResolvedValue(opts.rateLimitAllowed ?? true);
+  const escalate = opts.escalateFails
+    ? jest.fn().mockRejectedValue(new Error('resend down'))
+    : jest.fn().mockResolvedValue({ id: 'lead-1' });
 
   const whatsapp = { sendText } as unknown as WhatsAppService;
   const agencyService = {
@@ -38,9 +57,11 @@ function createService(
   const conversationService = {
     getOrCreateActive,
     appendMessages,
+    markEscalated,
   } as unknown as ConversationService;
   const agent = { processMessage } as unknown as AgentService;
   const rateLimit = { checkAndIncrement } as unknown as RateLimitService;
+  const escalation = { escalate } as unknown as EscalationService;
 
   return {
     service: new WebhookService(
@@ -49,13 +70,16 @@ function createService(
       conversationService,
       agent,
       rateLimit,
+      escalation,
     ),
     sendText,
     resolveIdByPhoneNumberId,
     getOrCreateActive,
     appendMessages,
+    markEscalated,
     processMessage,
     checkAndIncrement,
+    escalate,
   };
 }
 
@@ -212,6 +236,69 @@ describe('WebhookService', () => {
       expect(getOrCreateActive).not.toHaveBeenCalled();
       expect(appendMessages).not.toHaveBeenCalled();
       expect(processMessage).not.toHaveBeenCalled();
+    });
+
+    it('escalates and hands off when the conversation is at the message cap, without calling the agent', async () => {
+      const {
+        service,
+        sendText,
+        escalate,
+        markEscalated,
+        appendMessages,
+        processMessage,
+      } = createService({ messageCount: MAX_MESSAGES });
+
+      await service.processInbound(textPayload());
+
+      expect(escalate).toHaveBeenCalledWith(
+        'agency-1',
+        expect.objectContaining({ phone: '5491122223333' }),
+        'conv-1',
+      );
+      expect(markEscalated).toHaveBeenCalledWith('conv-1', 'agency-1');
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(
+        '5491122223333',
+        MESSAGE_CAP_REPLY_ES,
+      );
+      expect(appendMessages).not.toHaveBeenCalled();
+      expect(processMessage).not.toHaveBeenCalled();
+    });
+
+    it('escalates past the cap too (>= not just ==)', async () => {
+      const { service, sendText } = createService({
+        messageCount: MAX_MESSAGES + 5,
+      });
+
+      await service.processInbound(textPayload());
+
+      expect(sendText).toHaveBeenCalledWith(
+        '5491122223333',
+        MESSAGE_CAP_REPLY_ES,
+      );
+    });
+
+    it('sends the generic fallback and does not mark escalated when escalating at the cap fails', async () => {
+      const { service, sendText, markEscalated } = createService({
+        messageCount: MAX_MESSAGES,
+        escalateFails: true,
+      });
+
+      await service.processInbound(textPayload());
+
+      expect(sendText).toHaveBeenCalledWith('5491122223333', FALLBACK_REPLY_ES);
+      expect(markEscalated).not.toHaveBeenCalled();
+    });
+
+    it('stays on the normal reply flow when under the message cap', async () => {
+      const { service, sendText, processMessage } = createService({
+        messageCount: MAX_MESSAGES - 1,
+      });
+
+      await service.processInbound(textPayload());
+
+      expect(processMessage).toHaveBeenCalled();
+      expect(sendText).toHaveBeenCalledWith('5491122223333', AGENT_REPLY);
     });
 
     it('ignores status-only payloads (no reply storm)', async () => {

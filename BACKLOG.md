@@ -61,9 +61,9 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] `ConversationService` loads existing conversation or creates a new one per `(agency_id, phone)`
 - [x] 8-hour inactivity session timeout implemented
 - [x] Message history persisted to `conversations.messages` (JSONB, Claude-shaped `{role, content}` + timestamp + `whatsapp_message_id`)
-- [ ] `message_count` cap at 50 enforced (currently **not enforced** per ARCHITECTURE.md)
-- [ ] On reaching 50 messages → trigger `escalate_to_advisor` instead of continuing
-- [ ] TESTER: new conversation, continued conversation (<8h), expired conversation (>8h), message count boundary (49/50/51) — **partial:** new/continued/expired covered in `conversation.service.spec.ts`; count-boundary pending (cap not implemented yet)
+- [x] `message_count` cap at 50 enforced in `WebhookService.replyAndPersist`, checked right after loading the conversation, before the agent (Claude) is ever called
+- [x] On reaching 50 messages → `EscalationService` (new shared module: `LeadsService` + `AgencyService` + `NotificationsService`) saves a lead + notifies the advisor, `ConversationService.markEscalated` flips status to `'escalated'` — same escalation path the agent's `escalate_to_advisor` tool uses, not a separate one
+- [x] TESTER: new conversation, continued conversation (<8h), expired conversation (>8h) — `conversation.service.spec.ts`; message-count boundary (at cap, past cap, under cap, escalation failure fail-soft) — `webhook.service.spec.ts`; `EscalationService` itself — `escalation.service.spec.ts`
 
 ---
 
@@ -81,7 +81,7 @@ This is the single source of truth for what needs to be built. It is organized i
 
 > **Built.** The static placeholder reply has been replaced by the real agent (Luca), live end-to-end via the webhook.
 
-- [x] `AgentService` created: orchestrates calls to Claude API (`claude-haiku-4-5`) with tool calling
+- [x] `AgentService` created: orchestrates calls to Claude API (`claude-sonnet-4-6`) with tool calling
 - [x] System prompt written in `apps/api/src/agent/prompts/system.prompt.ts` (Spanish, versioned, never inlined)
   - [x] Identity anchoring (Luca's name, tone, "vos", scope)
   - [x] Prompt injection defense instructions
@@ -115,7 +115,7 @@ This is the single source of truth for what needs to be built. It is organized i
 ## Epic 8 — Agent Tools: Lead Management & Escalation
 
 - [x] `LeadsService.saveLead` — validates required fields, inserts filtered by `agency_id` (links `conversations.lead_id`)
-- [x] `LeadsService` / `NotificationsService` — `escalate_to_advisor` (composed in `AgentService`) saves lead + emails advisor via Resend
+- [x] `LeadsService` / `NotificationsService` — `escalate_to_advisor` (composed in `EscalationService`, shared with the Epic 4 message-cap handoff) saves lead + emails advisor via Resend
 - [x] Tool definitions: `save-lead.tool.ts`, `escalate-to-advisor.tool.ts`
 - [x] `NotificationsService` — Resend integration, non-blocking (failure logged, doesn't block lead save)
 - [ ] `LeadsController` — CRUD/status-update endpoints for admin panel — **deferred to Epic 11**
