@@ -60,8 +60,18 @@ export class PropertiesService {
     if (filters.type) {
       query = query.eq('type', filters.type);
     }
-    if (filters.zone) {
-      query = query.ilike('zone', `%${filters.zone}%`);
+    if (filters.zones?.length) {
+      // Match any of the requested neighborhoods. Each value is sanitized before it
+      // goes into the PostgREST `.or` grammar, since the zones originate from
+      // the client (via the agent) and could otherwise inject filter syntax.
+      const zoneFilter = filters.zones
+        .map((zone) => this.sanitizeZone(zone))
+        .filter(Boolean)
+        .map((zone) => `zone.ilike.%${zone}%`)
+        .join(',');
+      if (zoneFilter) {
+        query = query.or(zoneFilter);
+      }
     }
     if (filters.rooms !== undefined) {
       query = query.eq('rooms', filters.rooms);
@@ -155,5 +165,38 @@ export class PropertiesService {
     }
 
     return data ?? [];
+  }
+
+  /**
+   * Returns the distinct neighborhoods (`zone`) the agency has among available
+   * properties, sorted alphabetically. The agent uses this to resolve a broad
+   * region ("zona norte") into the actual neighborhoods in the catalogue, applying its
+   * own geographic knowledge — so no region→neighborhood map is hardcoded anywhere.
+   */
+  async listAvailableZones(agencyId: string): Promise<string[]> {
+    const { data, error } = await this.supabase.client
+      .from('properties')
+      .select('zone')
+      .eq('agency_id', agencyId)
+      .eq('available', true);
+
+    if (error) {
+      this.logger.error(
+        `[PropertiesService] Failed to list zones | agencyId: ${agencyId} | error: ${error.message}`,
+      );
+      throw new Error('Failed to list zones');
+    }
+
+    const zones = new Set((data ?? []).map((row) => row.zone).filter(Boolean));
+    return [...zones].sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
+   * Strips characters that could break the PostgREST `.or` filter grammar
+   * (commas, dots, parentheses, etc.), keeping letters, numbers, spaces and
+   * hyphens. Zone values are client-influenced, so this prevents filter injection.
+   */
+  private sanitizeZone(zone: string): string {
+    return zone.replace(/[^\p{L}\p{N}\s-]/gu, '').trim();
   }
 }

@@ -175,6 +175,11 @@ export class AgentService {
     ctx: ToolContext,
   ): Promise<string> {
     switch (block.name) {
+      case TOOL_NAMES.listAvailableZones: {
+        const zones = await this.properties.listAvailableZones(ctx.agencyId);
+        return JSON.stringify(zones);
+      }
+
       case TOOL_NAMES.searchByFilters: {
         const input = block.input as SearchByFiltersInput;
         const results = await this.properties.searchByFilters(

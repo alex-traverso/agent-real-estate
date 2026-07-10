@@ -22,7 +22,12 @@ export const searchPropertiesByFiltersTool: Anthropic.Tool = {
         enum: ['house', 'apartment', 'ph', 'office', 'land'],
         description: 'Property type.',
       },
-      zone: { type: 'string', description: 'Neighborhood or zone.' },
+      zones: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'One or more specific neighborhoods to search (a property matches any of them). For a broad region like "zona norte", resolve it to the real neighborhoods first with list_available_zones — do not pass the region name itself.',
+      },
       rooms: {
         type: 'integer',
         description: 'Number of rooms (ambientes).',

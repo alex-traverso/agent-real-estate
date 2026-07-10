@@ -1,4 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { listAvailableZonesTool } from './list-available-zones.tool';
 import { searchPropertiesByFiltersTool } from './search-properties-by-filters.tool';
 import { searchPropertiesSemanticTool } from './search-properties-semantic.tool';
 import { searchPropertyByAddressTool } from './search-property-by-address.tool';
@@ -7,6 +8,7 @@ import { escalateToAdvisorTool } from './escalate-to-advisor.tool';
 
 /** Every tool Luca can call, passed to the Claude Messages API. */
 export const ALL_TOOLS: Anthropic.Tool[] = [
+  listAvailableZonesTool,
   searchPropertiesByFiltersTool,
   searchPropertiesSemanticTool,
   searchPropertyByAddressTool,
