@@ -1,8 +1,12 @@
 /**
  * Claude model powering Luca. Overridable via the `ANTHROPIC_MODEL` env var.
- * Pinned to Haiku for latency/cost on high-volume WhatsApp traffic (per CLAUDE.md).
+ * Sonnet 4.6 over Sonnet 5: same list price long-term, but Sonnet 4.6's older
+ * tokenizer uses ~30% fewer tokens for the same text, and it runs without
+ * thinking by default (see createMessage) — both keep per-message cost down
+ * for high-volume WhatsApp traffic. Chosen over Haiku for conversational
+ * naturalness; cost is offset by prompt caching (see agent.service.ts).
  */
-export const DEFAULT_AGENT_MODEL = 'claude-haiku-4-5';
+export const DEFAULT_AGENT_MODEL = 'claude-sonnet-4-6';
 
 /**
  * Max tokens per Claude completion. WhatsApp replies are short, so this is a

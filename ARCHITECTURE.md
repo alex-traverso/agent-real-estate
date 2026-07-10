@@ -53,7 +53,7 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 | Service | Purpose |
 |---------|---------|
 | Meta Cloud API | WhatsApp messaging (send/receive) |
-| Anthropic Claude API (`claude-haiku-4-5`) | AI agent (conversation, tool calling) |
+| Anthropic Claude API (`claude-sonnet-4-6`) | AI agent (conversation, tool calling, prompt caching) |
 | OpenAI API (`text-embedding-3-small`) | Generating property and query embeddings |
 
 ---
@@ -115,18 +115,21 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 > in `conversations.messages` as Claude-shaped `{ role, content }` (+ timestamp,
 > whatsapp_message_id). The 50-message cap/escalation is not enforced yet.
 >
-> `AgentService` runs the Claude (`claude-haiku-4-5`) tool-calling loop with a
-> versioned Spanish system prompt (`agent/prompts/system.prompt.ts`) and five
-> tools (`agent/tools/*.ts`): `search_properties_by_filters`,
-> `search_properties_semantic`, `search_property_by_address`, `save_lead`,
-> `escalate_to_advisor`. Search is backed by `PropertiesService` /
-> `EmbeddingsService` (the semantic path via the `search_properties_semantic`
-> pgvector RPC); leads by `LeadsService`; escalation composes `LeadsService` +
-> `AgencyService.getContactEmail` + `NotificationsService` (Resend, non-blocking).
-> Every path is scoped by `agency_id`, the system prompt never contains client
-> text, and the lead `phone` is taken from the conversation, never from the model.
-> The admin-facing `PropertiesController` / `LeadsController` are deferred to the
-> admin panel (Epic 11).
+> `AgentService` runs the Claude (`claude-sonnet-4-6`) tool-calling loop with a
+> versioned Spanish system prompt (`agent/prompts/system.prompt.ts`) and six
+> tools (`agent/tools/*.ts`): `list_available_zones`,
+> `search_properties_by_filters`, `search_properties_semantic`,
+> `search_property_by_address`, `save_lead`, `escalate_to_advisor`. Search is
+> backed by `PropertiesService` / `EmbeddingsService` (the semantic path via
+> the `search_properties_semantic` pgvector RPC); leads by `LeadsService`;
+> escalation composes `LeadsService` + `AgencyService.getContactEmail` +
+> `NotificationsService` (Resend, non-blocking). Every path is scoped by
+> `agency_id`, the system prompt never contains client text, and the lead
+> `phone` is taken from the conversation, never from the model. The request to
+> Claude uses prompt caching (see "Prompt Caching Strategy" below) and
+> disables thinking explicitly, since Luca's replies are short and
+> conversational. The admin-facing `PropertiesController` / `LeadsController`
+> are deferred to the admin panel (Epic 11).
 ```
 
 ---
@@ -279,9 +282,9 @@ Full schema definition is in `.agents/DB.md`. Generated TypeScript types are in 
 AgentService.processMessage(history, agencyId)
         ↓
 Call Claude API with:
-  - system prompt (system.prompt.ts)
-  - full conversation history
-  - tool definitions (5 tools)
+  - system prompt (system.prompt.ts), cached
+  - full conversation history, cached up to the newest turn
+  - tool definitions (6 tools), cached
         ↓
 Claude returns: text | tool_use
         ↓
@@ -298,11 +301,32 @@ Return final text to WebhookService
 
 | Tool | Input | Output |
 |------|-------|--------|
+| `list_available_zones` | (none) | string[] of loaded zones/neighborhoods |
 | `search_properties_by_filters` | operation, zone, rooms, max_price, currency, type | Property[] |
 | `search_properties_semantic` | query_text, operation, match_count | Property[] with similarity score |
 | `search_property_by_address` | address, zone | Property or null |
 | `save_lead` | name, phone, operation_type, zone, budget, rooms, property_id, notes | Lead |
 | `escalate_to_advisor` | phone, reason, conversation_summary | void (sends email) |
+
+### Prompt Caching Strategy
+
+The API's prompt render order is `tools` → `system` → `messages`, and caching is a prefix match (any change invalidates everything after it). `AgentService` uses this deliberately to keep Sonnet-tier cost down on high-volume WhatsApp traffic:
+
+```
+tools (6 defs) + system prompt        ← one cache breakpoint on the last
+                                         system block; identical across every
+                                         conversation, stays warm continuously
+        ↓
+conversation history (all prior turns) ← one cache breakpoint on the
+                                          second-to-last message, refreshed
+                                          on every request
+        ↓
+newest user turn + Claude's new reply  ← always uncached (unique per request)
+```
+
+- **TTL:** 5-minute ephemeral cache (`cache_control: { type: 'ephemeral' }`), the default. The static tools+system prefix gets reused continuously by any traffic; the history breakpoint benefits bursty back-and-forth within a session. Not tied to the 8h session timeout — the cache TTL and the session timeout are independent.
+- **Thinking is explicitly disabled** (`thinking: { type: 'disabled' }`), not just omitted — this protects against a silent cost regression if `ANTHROPIC_MODEL` is ever overridden to a model where adaptive thinking is on by default.
+- **Token usage is logged per call** (`input`, `output`, `cache_creation_input_tokens`, `cache_read_input_tokens`) for cost visibility, without phone numbers or message content.
 
 ### Search Strategy (enforced in system prompt)
 
@@ -435,8 +459,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=  # Supabase anon key (public, RLS enforced)
 | ORM | Supabase JS client (no ORM) | Simple queries, RLS compatibility, no overhead |
 | Rate limit storage | Supabase table | Persists across server restarts |
 | Embedding model | OpenAI text-embedding-3-small | Claude has no embedding model; OpenAI free credits available |
-| AI model | Claude Haiku | Cost-efficient for high-frequency WhatsApp interactions |
-| Conversation history | Full history per request | Better agent context; 50-message limit controls cost |
+| AI model | Claude Sonnet 4.6 | More natural conversational tone than Haiku; cost controlled via prompt caching (see Prompt Caching Strategy) rather than a cheaper model |
+| Conversation history | Full history per request, prompt-cached | Better agent context; caching keeps resending full history cheap; 50-message limit is the remaining hard cost bound |
 | Session timeout | 8 hours | Balances context retention with DB storage |
 | Admin auth | Supabase Auth | Already in stack, email/password out of the box |
 | Notifications | Resend email | Simpler than WhatsApp-to-advisor; free tier sufficient |

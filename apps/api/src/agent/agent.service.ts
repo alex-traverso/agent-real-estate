@@ -55,6 +55,19 @@ export class AgentService {
   private readonly client: Anthropic;
   private readonly model: string;
 
+  /**
+   * System prompt as a single cached block. Tools render before `system` in
+   * the API's prompt layout, so one breakpoint here caches tools + system
+   * together — no separate breakpoint is needed on the tools array.
+   */
+  private readonly systemBlocks: Anthropic.TextBlockParam[] = [
+    {
+      type: 'text',
+      text: SYSTEM_PROMPT,
+      cache_control: { type: 'ephemeral' },
+    },
+  ];
+
   constructor(
     configService: ConfigService,
     private readonly properties: PropertiesService,
@@ -91,7 +104,7 @@ export class AgentService {
     ];
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const response = await this.createMessage(messages);
+      const response = await this.createMessage(messages, ctx.conversationId);
 
       if (response.stop_reason !== 'tool_use') {
         return this.extractText(response);
@@ -112,17 +125,32 @@ export class AgentService {
     throw new Error('Agent exceeded max tool iterations');
   }
 
+  /**
+   * Calls the Claude Messages API. Thinking is explicitly disabled: Luca's
+   * replies are short and conversational, and leaving `thinking` unset would
+   * silently start costing thinking tokens if `ANTHROPIC_MODEL` is ever
+   * pointed at a model where adaptive thinking is the on-by-default behavior
+   * (e.g. Sonnet 5) — an explicit `disabled` protects the cost budget across
+   * a future model swap.
+   */
   private async createMessage(
     messages: Anthropic.MessageParam[],
+    conversationId: string,
   ): Promise<Anthropic.Message> {
     try {
-      return await this.client.messages.create({
+      const response = await this.client.messages.create({
         model: this.model,
         max_tokens: MAX_OUTPUT_TOKENS,
-        system: SYSTEM_PROMPT,
-        messages,
+        system: this.systemBlocks,
+        messages: this.withHistoryCacheBreakpoint(messages),
         tools: ALL_TOOLS,
+        // tool_choice intentionally left unset (defaults to "auto"): Luca must
+        // be able to reply with plain text (e.g. a greeting) without being
+        // forced to call a tool.
+        thinking: { type: 'disabled' },
       });
+      this.logUsage(conversationId, response.usage);
+      return response;
     } catch (error) {
       this.logger.error(
         `[AgentService] Claude request failed | model: ${this.model} | error: ${
@@ -131,6 +159,60 @@ export class AgentService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Marks the last content block of the second-to-last message with a cache
+   * breakpoint, so every prior turn is served from cache and only the newest
+   * turn (plus the model's new response) is billed as fresh input. Returns a
+   * new array — the caller's `messages` (persisted/mutated across the tool
+   * loop) is left untouched.
+   */
+  private withHistoryCacheBreakpoint(
+    messages: Anthropic.MessageParam[],
+  ): Anthropic.MessageParam[] {
+    if (messages.length < 2) {
+      // No prior turn to cache yet — marking the only message would just add
+      // a cache-write cost with no read to offset it.
+      return messages;
+    }
+
+    const targetIndex = messages.length - 2;
+    const target = messages[targetIndex];
+    const blocks = this.toContentBlocks(target.content);
+    const lastIndex = blocks.length - 1;
+    const cachedBlocks = [...blocks];
+    cachedBlocks[lastIndex] = {
+      ...cachedBlocks[lastIndex],
+      cache_control: { type: 'ephemeral' },
+    } as Anthropic.ContentBlockParam;
+
+    const result = [...messages];
+    result[targetIndex] = { ...target, content: cachedBlocks };
+    return result;
+  }
+
+  private toContentBlocks(
+    content: Anthropic.MessageParam['content'],
+  ): Anthropic.ContentBlockParam[] {
+    if (typeof content === 'string') {
+      return [{ type: 'text', text: content }];
+    }
+    return content;
+  }
+
+  /**
+   * Logs token usage per Claude call so cache effectiveness and per-message
+   * cost are visible in production. Never logs phone numbers or message
+   * content (per CLAUDE.md) — only counts and the conversation id.
+   */
+  private logUsage(conversationId: string, usage: Anthropic.Usage): void {
+    this.logger.log(
+      `[AgentService] Token usage | conversationId: ${conversationId} | ` +
+        `in: ${usage.input_tokens} | out: ${usage.output_tokens} | ` +
+        `cacheWrite: ${usage.cache_creation_input_tokens ?? 0} | ` +
+        `cacheRead: ${usage.cache_read_input_tokens ?? 0}`,
+    );
   }
 
   /** Executes every tool_use block in a response, returning their tool_result blocks. */
