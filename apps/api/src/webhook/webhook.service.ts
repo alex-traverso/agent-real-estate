@@ -4,14 +4,25 @@ import { AgencyService } from '../agency/agency.service';
 import { ConversationService } from '../conversation/conversation.service';
 import { AgentService } from '../agent/agent.service';
 import { RateLimitService } from '../rate-limit/rate-limit.service';
+import { EscalationService } from '../escalation/escalation.service';
+import { MAX_MESSAGES } from '../conversation/conversation.constants';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
-import { FALLBACK_REPLY_ES, RATE_LIMIT_REPLY_ES } from './webhook.constants';
+import type { SaveLeadInput } from '../leads/types/lead-input.type';
+import type { Tables } from 'types';
+import {
+  FALLBACK_REPLY_ES,
+  MESSAGE_CAP_NOTE,
+  MESSAGE_CAP_REPLY_ES,
+  RATE_LIMIT_REPLY_ES,
+} from './webhook.constants';
 import { isTextMessage } from './types/whatsapp-webhook.types';
 import type {
   WhatsAppMessage,
   WhatsAppTextMessage,
   WhatsAppWebhookPayload,
 } from './types/whatsapp-webhook.types';
+
+type Conversation = Tables<'conversations'>;
 
 /**
  * Orchestrates inbound WhatsApp webhook events: resolves the tenant, checks
@@ -31,6 +42,7 @@ export class WebhookService {
     private readonly conversationService: ConversationService,
     private readonly agent: AgentService,
     private readonly rateLimit: RateLimitService,
+    private readonly escalation: EscalationService,
   ) {}
 
   /**
@@ -107,9 +119,9 @@ export class WebhookService {
    * Persists the inbound message, asks the agent for a reply, sends it, and
    * persists the reply. The inbound message is saved before sending so it is not
    * lost if the send fails. The prior history is snapshotted before appending
-   * the inbound turn, since the agent expects history that excludes it. The
-   * 50-message cap / escalation (ARCHITECTURE step 7) is not built yet — see
-   * MAX_MESSAGES.
+   * the inbound turn, since the agent expects history that excludes it. A
+   * conversation that already hit MAX_MESSAGES is diverted to escalateAtCap
+   * instead — no agent call, no history append for this message.
    */
   private async replyAndPersist(
     agencyId: string,
@@ -119,6 +131,11 @@ export class WebhookService {
       agencyId,
       message.from,
     );
+
+    if ((conversation.message_count ?? 0) >= MAX_MESSAGES) {
+      await this.escalateAtCap(agencyId, conversation, message.from);
+      return;
+    }
 
     // History as seen by the agent must NOT include the incoming turn yet.
     const priorHistory =
@@ -151,6 +168,35 @@ export class WebhookService {
     await this.conversationService.appendMessages(conversation, [
       assistantMessage,
     ]);
+  }
+
+  /**
+   * Handles a conversation that already hit MAX_MESSAGES: escalates (saves a
+   * lead + notifies the advisor, via the same EscalationService the agent's
+   * `escalate_to_advisor` tool uses), marks the conversation `escalated`, and
+   * tells the client. No AgentService/Claude call — the cheapest possible path,
+   * same posture as RateLimitService's blocked path. If the escalation itself
+   * fails, the client gets the generic fallback instead and the conversation
+   * is left `active` so the next message retries the cap check.
+   */
+  private async escalateAtCap(
+    agencyId: string,
+    conversation: Conversation,
+    phone: string,
+  ): Promise<void> {
+    try {
+      const input: SaveLeadInput = { phone, notes: MESSAGE_CAP_NOTE };
+      await this.escalation.escalate(agencyId, input, conversation.id);
+      await this.conversationService.markEscalated(conversation.id, agencyId);
+      await this.whatsapp.sendText(phone, MESSAGE_CAP_REPLY_ES);
+    } catch (error) {
+      this.logger.error(
+        `[WebhookService] Failed to escalate at message cap | conversationId: ${
+          conversation.id
+        } | error: ${error instanceof Error ? error.message : 'unknown'}`,
+      );
+      await this.whatsapp.sendText(phone, FALLBACK_REPLY_ES);
+    }
   }
 
   /**

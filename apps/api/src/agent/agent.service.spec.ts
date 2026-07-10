@@ -5,8 +5,7 @@ import { SYSTEM_PROMPT } from './prompts/system.prompt';
 import { DEFAULT_AGENT_MODEL } from './agent.constants';
 import type { PropertiesService } from '../properties/properties.service';
 import type { LeadsService } from '../leads/leads.service';
-import type { NotificationsService } from '../notifications/notifications.service';
-import type { AgencyService } from '../agency/agency.service';
+import type { EscalationService } from '../escalation/escalation.service';
 
 interface ContentBlock {
   type: string;
@@ -79,21 +78,17 @@ function makeService(config = makeConfig()) {
       .mockResolvedValue(['Nordelta', 'Palermo', 'San Isidro']),
   };
   const leads = { saveLead: jest.fn().mockResolvedValue({ id: 'lead-1' }) };
-  const notifications = {
-    notifyAdvisor: jest.fn().mockResolvedValue(undefined),
-  };
-  const agency = {
-    getContactEmail: jest.fn().mockResolvedValue('advisor@agency.com'),
+  const escalation = {
+    escalate: jest.fn().mockResolvedValue({ id: 'lead-1' }),
   };
 
   const service = new AgentService(
     config,
     properties as unknown as PropertiesService,
     leads as unknown as LeadsService,
-    notifications as unknown as NotificationsService,
-    agency as unknown as AgencyService,
+    escalation as unknown as EscalationService,
   );
-  return { service, properties, leads, notifications, agency };
+  return { service, properties, leads, escalation };
 }
 
 function textResponse(text: string): CreateResult {
@@ -314,7 +309,7 @@ describe('AgentService', () => {
     );
   });
 
-  it('escalates: saves the lead, resolves the advisor email and notifies', async () => {
+  it('escalates via EscalationService (shared with the message-cap handoff)', async () => {
     mockCreate
       .mockResolvedValueOnce(
         toolUseResponse('escalate_to_advisor', {
@@ -323,22 +318,18 @@ describe('AgentService', () => {
         }),
       )
       .mockResolvedValueOnce(textResponse('Un asesor se va a contactar.'));
-    const { service, leads, agency, notifications } = makeService();
+    const { service, escalation } = makeService();
 
     await service.processMessage(baseInput);
 
-    expect(leads.saveLead).toHaveBeenCalledWith(
+    expect(escalation.escalate).toHaveBeenCalledWith(
       'agency-1',
       expect.objectContaining({
         phone: '5491122334455',
+        name: 'Juan',
         notes: 'quiere hablar con una persona',
       }),
       'conv-1',
-    );
-    expect(agency.getContactEmail).toHaveBeenCalledWith('agency-1');
-    expect(notifications.notifyAdvisor).toHaveBeenCalledWith(
-      'advisor@agency.com',
-      { id: 'lead-1' },
     );
   });
 

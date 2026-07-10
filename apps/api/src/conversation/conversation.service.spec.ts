@@ -155,4 +155,19 @@ describe('ConversationService', () => {
       expect(builder.eq).toHaveBeenCalledWith('agency_id', 'agency-1');
     });
   });
+
+  describe('markEscalated', () => {
+    it('sets status to escalated, scoped by agency_id', async () => {
+      const { supabase, builder } = makeClient([]);
+      const service = new ConversationService(supabase);
+
+      await service.markEscalated('conv-1', 'agency-1');
+
+      expect(builder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'escalated' }),
+      );
+      expect(builder.eq).toHaveBeenCalledWith('id', 'conv-1');
+      expect(builder.eq).toHaveBeenCalledWith('agency_id', 'agency-1');
+    });
+  });
 });

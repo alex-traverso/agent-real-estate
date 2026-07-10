@@ -5,8 +5,8 @@
 export const SESSION_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 
 /**
- * Max messages per conversation before handing off to a human advisor.
- * Enforcement (escalate_to_advisor + notifications) is not built yet — this
- * constant is reserved for that step. See the agent iteration.
+ * Max messages (both roles combined) per conversation before WebhookService
+ * hands off to a human advisor instead of calling the agent — see
+ * WebhookService.replyAndPersist.
  */
 export const MAX_MESSAGES = 50;

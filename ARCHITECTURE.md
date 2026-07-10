@@ -87,8 +87,14 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
    → New phone or session expired (8h): create new conversation
    → Existing: load full message history
          ↓
-8. Check message_count >= 50
-   → Yes: escalate to advisor, close conversation
+8. Check message_count >= 50 (right after loading the conversation, before
+   persisting the inbound turn)
+   → Yes: EscalationService saves a lead + notifies the advisor,
+     ConversationService.markEscalated flips status to 'escalated', client
+     gets a handoff message — no AgentService/Claude call, nothing appended
+     to history for this message. Same fail-soft posture as rate limiting:
+     if the escalation itself fails, the client gets the generic fallback
+     and the conversation stays 'active' so the next message retries.
    → No: continue
          ↓
 9. AgentService calls Claude API
@@ -100,7 +106,10 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
    → search_properties_semantic     → EmbeddingsService (OpenAI) → pgvector RPC
    → search_property_by_address     → PropertiesService → Supabase query
    → save_lead                      → LeadsService → Supabase insert
-   → escalate_to_advisor            → LeadsService + NotificationsService (Resend)
+   → escalate_to_advisor            → EscalationService (LeadsService +
+                                       AgencyService + NotificationsService) —
+                                       the same service the step-8 cap
+                                       handoff uses, one escalation path
    → Tool result sent back to Claude
    → Claude generates final response
          ↓
@@ -122,12 +131,14 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 > `agencies.whatsapp_phone_number_id`, via AgencyService), checks the rate
 > limit (`RateLimitService`, 20 msg/min per phone, persisted in `rate_limits`
 > so it survives restarts), loads/creates the conversation (ConversationService,
-> 8h session timeout), persists the inbound turn, then delegates the reply to
+> 8h session timeout), checks the 50-message cap (escalates via
+> `EscalationService` + `ConversationService.markEscalated` and returns early
+> if hit — see step 8), persists the inbound turn, then delegates the reply to
 > `AgentService.processMessage` (Luca) and sends it via WhatsAppService. On any
 > agent failure a generic Spanish fallback is sent — the internal error is
 > never surfaced to the client. History is stored
 > in `conversations.messages` as Claude-shaped `{ role, content }` (+ timestamp,
-> whatsapp_message_id). The 50-message cap/escalation is not enforced yet.
+> whatsapp_message_id).
 >
 > `AgentService` runs the Claude (`claude-sonnet-4-6`) tool-calling loop with a
 > versioned Spanish system prompt (`agent/prompts/system.prompt.ts`) and six
@@ -215,6 +226,12 @@ src/
 ├── notifications/
 │   ├── notifications.module.ts
 │   └── notifications.service.ts    # Resend email notifications to advisors
+│
+├── escalation/
+│   ├── escalation.module.ts
+│   └── escalation.service.ts       # Composes Leads + Agency + Notifications;
+│                                      shared by the agent's escalate_to_advisor
+│                                      tool and the webhook's message-cap handoff
 │
 ├── rate-limit/
 │   ├── rate-limit.module.ts

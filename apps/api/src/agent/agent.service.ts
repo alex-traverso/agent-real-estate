@@ -3,8 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { PropertiesService } from '../properties/properties.service';
 import { LeadsService } from '../leads/leads.service';
-import { NotificationsService } from '../notifications/notifications.service';
-import { AgencyService } from '../agency/agency.service';
+import { EscalationService } from '../escalation/escalation.service';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
 import type { SaveLeadInput } from '../leads/types/lead-input.type';
 import {
@@ -72,8 +71,7 @@ export class AgentService {
     configService: ConfigService,
     private readonly properties: PropertiesService,
     private readonly leads: LeadsService,
-    private readonly notifications: NotificationsService,
-    private readonly agency: AgencyService,
+    private readonly escalation: EscalationService,
   ) {
     // Fail fast on boot if the key is missing — a misconfigured agent should
     // crash at startup, not at the first client message.
@@ -303,19 +301,11 @@ export class AgentService {
 
       case TOOL_NAMES.escalateToAdvisor: {
         const input = block.input as EscalateToAdvisorInput;
-        const lead = await this.leads.saveLead(
+        const lead = await this.escalation.escalate(
           ctx.agencyId,
           this.toSaveLeadInput(input, ctx, input.reason),
           ctx.conversationId,
         );
-        const advisorEmail = await this.agency.getContactEmail(ctx.agencyId);
-        if (advisorEmail) {
-          await this.notifications.notifyAdvisor(advisorEmail, lead);
-        } else {
-          this.logger.warn(
-            `[AgentService] No advisor email to notify | agencyId: ${ctx.agencyId} | leadId: ${lead.id}`,
-          );
-        }
         return JSON.stringify({ escalated: true, leadId: lead.id });
       }
 
