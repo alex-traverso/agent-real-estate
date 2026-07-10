@@ -125,12 +125,12 @@ This is the single source of truth for what needs to be built. It is organized i
 
 ## Epic 9 — Rate Limiting
 
-- [ ] `RateLimitService` — checks/increments `rate_limits` table per `(agency_id, phone)`
-- [ ] `RateLimitGuard` applied to the webhook endpoint, runs **before** any Claude API call
-- [ ] Limit: 20 messages/minute per phone → polite fallback message, HTTP 200 to Meta, Claude not invoked
-- [ ] Cleanup job/query for rate limit windows older than 1 hour
-- [ ] SECURITY: confirm rate limit state is in Supabase (not in-memory) — survives restarts
-- [ ] TESTER: under limit, at boundary (20th), over limit (21st), window reset, restart persistence
+- [x] `RateLimitService` — checks/upserts `rate_limits` table per `(agency_id, phone)`
+- [x] Called from `WebhookService.processInbound`, **before** `ConversationService`/`AgentService` (Claude) — **not** a NestJS `Guard`: the webhook is fire-and-forget and the phone/`agency_id` are only known after per-message tenant resolution, past the point a `CanActivate` guard could intervene. See `ARCHITECTURE.md` → Full Request Flow.
+- [x] Limit: 20 messages/minute per phone → polite Spanish reply, HTTP 200 to Meta (already the default, fire-and-forget), Claude not invoked, nothing persisted to conversation history
+- [x] No cleanup job needed: one row per `(agency_id, phone)` (`UNIQUE` constraint added), upserted/reset in place each window instead of inserted per-window
+- [x] SECURITY: rate limit state is in Supabase (`rate_limits` table via `SupabaseService`), not in-memory — survives restarts by construction (the service holds no window state itself)
+- [x] TESTER: under limit (increments), at boundary (20th allowed), over limit (21st blocked, no increment), window reset, Supabase read error (fails open) — `rate-limit.service.spec.ts`; blocked-phone path (never reaches the agent) — `webhook.service.spec.ts`
 
 ---
 

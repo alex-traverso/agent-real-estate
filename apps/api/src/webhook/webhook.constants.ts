@@ -8,3 +8,11 @@ export const FALLBACK_REPLY_ES =
   'Perdoná, estoy teniendo un inconveniente para responderte en este momento. ' +
   'Un asesor se va a poner en contacto con vos a la brevedad. ' +
   '¡Gracias por tu paciencia!';
+
+/**
+ * Generic Spanish reply sent when a phone hits the rate limit (RateLimitService).
+ * No internal detail (limit values, window), just a polite ask to slow down.
+ */
+export const RATE_LIMIT_REPLY_ES =
+  'Estás escribiendo muy rápido, dame un minuto para poder seguirte el ritmo. ' +
+  'Ya te respondo.';

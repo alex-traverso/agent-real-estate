@@ -107,6 +107,7 @@ export type Database = {
           {
             foreignKeyName: "agency_users_agency_id_fkey"
             columns: ["agency_id"]
+            isOneToOne: false
             referencedRelation: "agencies"
             referencedColumns: ["id"]
           },
@@ -153,12 +154,14 @@ export type Database = {
           {
             foreignKeyName: "conversations_agency_id_fkey"
             columns: ["agency_id"]
+            isOneToOne: false
             referencedRelation: "agencies"
             referencedColumns: ["id"]
           },
           {
             foreignKeyName: "conversations_lead_id_fkey"
             columns: ["lead_id"]
+            isOneToOne: false
             referencedRelation: "leads"
             referencedColumns: ["id"]
           },
@@ -217,12 +220,14 @@ export type Database = {
           {
             foreignKeyName: "leads_agency_id_fkey"
             columns: ["agency_id"]
+            isOneToOne: false
             referencedRelation: "agencies"
             referencedColumns: ["id"]
           },
           {
             foreignKeyName: "leads_property_id_fkey"
             columns: ["property_id"]
+            isOneToOne: false
             referencedRelation: "properties"
             referencedColumns: ["id"]
           },
@@ -299,6 +304,7 @@ export type Database = {
           {
             foreignKeyName: "properties_agency_id_fkey"
             columns: ["agency_id"]
+            isOneToOne: false
             referencedRelation: "agencies"
             referencedColumns: ["id"]
           },
@@ -333,6 +339,7 @@ export type Database = {
           {
             foreignKeyName: "rate_limits_agency_id_fkey"
             columns: ["agency_id"]
+            isOneToOne: false
             referencedRelation: "agencies"
             referencedColumns: ["id"]
           },
@@ -506,6 +513,7 @@ export type Database = {
           {
             foreignKeyName: "iceberg_namespaces_catalog_id_fkey"
             columns: ["catalog_id"]
+            isOneToOne: false
             referencedRelation: "buckets_analytics"
             referencedColumns: ["id"]
           },
@@ -555,12 +563,14 @@ export type Database = {
           {
             foreignKeyName: "iceberg_tables_catalog_id_fkey"
             columns: ["catalog_id"]
+            isOneToOne: false
             referencedRelation: "buckets_analytics"
             referencedColumns: ["id"]
           },
           {
             foreignKeyName: "iceberg_tables_namespace_id_fkey"
             columns: ["namespace_id"]
+            isOneToOne: false
             referencedRelation: "iceberg_namespaces"
             referencedColumns: ["id"]
           },
@@ -634,6 +644,7 @@ export type Database = {
           {
             foreignKeyName: "objects_bucketId_fkey"
             columns: ["bucket_id"]
+            isOneToOne: false
             referencedRelation: "buckets"
             referencedColumns: ["id"]
           },
@@ -680,6 +691,7 @@ export type Database = {
           {
             foreignKeyName: "s3_multipart_uploads_bucket_id_fkey"
             columns: ["bucket_id"]
+            isOneToOne: false
             referencedRelation: "buckets"
             referencedColumns: ["id"]
           },
@@ -726,12 +738,14 @@ export type Database = {
           {
             foreignKeyName: "s3_multipart_uploads_parts_bucket_id_fkey"
             columns: ["bucket_id"]
+            isOneToOne: false
             referencedRelation: "buckets"
             referencedColumns: ["id"]
           },
           {
             foreignKeyName: "s3_multipart_uploads_parts_upload_id_fkey"
             columns: ["upload_id"]
+            isOneToOne: false
             referencedRelation: "s3_multipart_uploads"
             referencedColumns: ["id"]
           },
@@ -775,6 +789,7 @@ export type Database = {
           {
             foreignKeyName: "vector_indexes_bucket_id_fkey"
             columns: ["bucket_id"]
+            isOneToOne: false
             referencedRelation: "buckets_vectors"
             referencedColumns: ["id"]
           },
@@ -1057,3 +1072,4 @@ export const Constants = {
     },
   },
 } as const
+

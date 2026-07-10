@@ -67,29 +67,35 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
          ↓
 2. Meta Cloud API sends POST to /webhook
          ↓
-3. WebhookGuard validates X-Hub-Signature-256
+3. WebhookSignatureGuard validates X-Hub-Signature-256
    → Invalid: return 403, stop
    → Valid: continue
          ↓
-4. RateLimitGuard checks rate_limits table
-   → phone >= 20 messages in last 60s: return polite message + HTTP 200, stop
-   → OK: increment counter, continue
+4. WebhookController returns HTTP 200 to Meta immediately (fire-and-forget) and
+   dispatches WebhookService.processInbound in the background — a slow or
+   non-200 response makes Meta retry the same event, causing duplicate replies
          ↓
-5. WebhookController extracts message payload
+5. WebhookService extracts the message payload, resolves the tenant
+   (metadata.phone_number_id → agency_id, via AgencyService)
          ↓
-6. ConversationService loads or creates conversation
+6. RateLimitService checks the rate_limits table (agency_id, phone)
+   → phone >= 20 messages in the last 60s: send a polite WhatsApp reply
+     directly and stop — no ConversationService, no AgentService/Claude call
+   → OK: upsert the window (increment or reset), continue
+         ↓
+7. ConversationService loads or creates conversation
    → New phone or session expired (8h): create new conversation
    → Existing: load full message history
          ↓
-7. Check message_count >= 50
+8. Check message_count >= 50
    → Yes: escalate to advisor, close conversation
    → No: continue
          ↓
-8. AgentService calls Claude API
+9. AgentService calls Claude API
    → Sends: system prompt + full conversation history + available tools
    → Claude responds with text or tool call
          ↓
-9. If Claude calls a tool:
+10. If Claude calls a tool:
    → search_properties_by_filters   → PropertiesService → Supabase query
    → search_properties_semantic     → EmbeddingsService (OpenAI) → pgvector RPC
    → search_property_by_address     → PropertiesService → Supabase query
@@ -98,20 +104,28 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
    → Tool result sent back to Claude
    → Claude generates final response
          ↓
-10. ConversationService saves updated history to Supabase
+11. ConversationService saves updated history to Supabase
           ↓
-11. WebhookService calls WhatsAppService (messaging module) to send the
+12. WebhookService calls WhatsAppService (messaging module) to send the
     response to the client via Meta Cloud API
-          ↓
-12. Return HTTP 200 to Meta
+
+> **Why rate limiting isn't a `Guard`:** step 4 is fire-and-forget — the
+> controller answers Meta before any message is even parsed. The phone number
+> and its `agency_id` are only known inside `WebhookService.processInbound`,
+> after per-message tenant resolution (step 5). A `CanActivate` guard runs
+> before the controller method and has no access to that async, per-message
+> state, so `RateLimitService` is a plain injectable called directly from
+> `WebhookService`, not an HTTP-level guard.
 
 > **Current state:** the agent is **live**. The webhook receives and verifies
 > messages, resolves the tenant from `metadata.phone_number_id` (→
-> `agencies.whatsapp_phone_number_id`, via AgencyService), loads/creates the
-> conversation (ConversationService, 8h session timeout), persists the inbound
-> turn, then delegates the reply to `AgentService.processMessage` (Luca) and
-> sends it via WhatsAppService. On any agent failure a generic Spanish fallback
-> is sent — the internal error is never surfaced to the client. History is stored
+> `agencies.whatsapp_phone_number_id`, via AgencyService), checks the rate
+> limit (`RateLimitService`, 20 msg/min per phone, persisted in `rate_limits`
+> so it survives restarts), loads/creates the conversation (ConversationService,
+> 8h session timeout), persists the inbound turn, then delegates the reply to
+> `AgentService.processMessage` (Luca) and sends it via WhatsAppService. On any
+> agent failure a generic Spanish fallback is sent — the internal error is
+> never surfaced to the client. History is stored
 > in `conversations.messages` as Claude-shaped `{ role, content }` (+ timestamp,
 > whatsapp_message_id). The 50-message cap/escalation is not enforced yet.
 >
@@ -204,8 +218,10 @@ src/
 │
 ├── rate-limit/
 │   ├── rate-limit.module.ts
-│   ├── rate-limit.service.ts       # Check and increment rate_limits table
-│   └── rate-limit.guard.ts         # Applied to webhook endpoint
+│   ├── rate-limit.service.ts       # Checks/upserts rate_limits; called from
+│   │                                 WebhookService (not a Guard — see
+│   │                                 Full Request Flow above for why)
+│   └── rate-limit.constants.ts     # Max messages (20) + window (60s)
 │
 └── common/
     ├── supabase/
@@ -369,9 +385,9 @@ Claude receives results and presents top matches to client
 ```
 Internet
     ↓
-[1] Meta signature validation (WebhookGuard)
+[1] Meta signature validation (WebhookSignatureGuard)
     ↓
-[2] Rate limiting per phone (RateLimitGuard)
+[2] Rate limiting per phone (RateLimitService, called from WebhookService)
     ↓
 [3] Input sanitization
     ↓
