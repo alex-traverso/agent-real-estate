@@ -14,7 +14,15 @@ type Result = { data: unknown; error: { message: string } | null };
  */
 function makeService(results: Result[], vector: number[] = [0.1, 0.2, 0.3]) {
   const builder: Record<string, jest.Mock> & { then?: unknown } = {};
-  for (const method of ['select', 'eq', 'ilike', 'order', 'limit', 'lte']) {
+  for (const method of [
+    'select',
+    'eq',
+    'ilike',
+    'or',
+    'order',
+    'limit',
+    'lte',
+  ]) {
     builder[method] = jest.fn(() => builder);
   }
   (builder as { then: unknown }).then = (resolve: (v: Result) => unknown) =>
@@ -77,14 +85,36 @@ describe('PropertiesService', () => {
       await service.searchByFilters('agency-1', {
         operation: 'rent',
         type: 'apartment',
-        zone: 'Palermo',
+        zones: ['Palermo'],
         rooms: 3,
       });
 
       expect(builder.eq).toHaveBeenCalledWith('operation', 'rent');
       expect(builder.eq).toHaveBeenCalledWith('type', 'apartment');
-      expect(builder.ilike).toHaveBeenCalledWith('zone', '%Palermo%');
+      expect(builder.or).toHaveBeenCalledWith('zone.ilike.%Palermo%');
       expect(builder.eq).toHaveBeenCalledWith('rooms', 3);
+    });
+
+    it('matches any of multiple zones via a sanitized or() filter', async () => {
+      const { service, builder } = makeService([{ data: [], error: null }]);
+
+      await service.searchByFilters('agency-1', {
+        zones: ['San Isidro', 'Nordelta'],
+      });
+
+      expect(builder.or).toHaveBeenCalledWith(
+        'zone.ilike.%San Isidro%,zone.ilike.%Nordelta%',
+      );
+    });
+
+    it('strips filter-grammar characters from zone values', async () => {
+      const { service, builder } = makeService([{ data: [], error: null }]);
+
+      await service.searchByFilters('agency-1', {
+        zones: ['Palermo,zone.eq.x)'],
+      });
+
+      expect(builder.or).toHaveBeenCalledWith('zone.ilike.%Palermozoneeqx%');
     });
 
     it('does not apply absent filters', async () => {
@@ -98,6 +128,7 @@ describe('PropertiesService', () => {
       );
       expect(builder.eq).not.toHaveBeenCalledWith('type', expect.anything());
       expect(builder.ilike).not.toHaveBeenCalled();
+      expect(builder.or).not.toHaveBeenCalled();
       expect(builder.lte).not.toHaveBeenCalled();
     });
 
@@ -246,6 +277,45 @@ describe('PropertiesService', () => {
       await expect(
         service.searchSemantic('agency-1', 'x', 'sale'),
       ).rejects.toThrow('Failed to search properties');
+    });
+  });
+
+  describe('listAvailableZones', () => {
+    it('returns distinct zones sorted, scoped by agency_id + available', async () => {
+      const { service, builder, from } = makeService([
+        {
+          data: [
+            { zone: 'Palermo' },
+            { zone: 'Nordelta' },
+            { zone: 'Palermo' },
+          ],
+          error: null,
+        },
+      ]);
+
+      const zones = await service.listAvailableZones('agency-1');
+
+      expect(zones).toEqual(['Nordelta', 'Palermo']);
+      expect(from).toHaveBeenCalledWith('properties');
+      expect(builder.eq).toHaveBeenCalledWith('agency_id', 'agency-1');
+      expect(builder.eq).toHaveBeenCalledWith('available', true);
+    });
+
+    it('returns an empty array when there are no properties', async () => {
+      const { service } = makeService([{ data: [], error: null }]);
+
+      await expect(service.listAvailableZones('agency-1')).resolves.toEqual([]);
+    });
+
+    it('throws a generic error when the query fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { service } = makeService([
+        { data: null, error: { message: 'db down' } },
+      ]);
+
+      await expect(service.listAvailableZones('agency-1')).rejects.toThrow(
+        'Failed to list zones',
+      );
     });
   });
 });

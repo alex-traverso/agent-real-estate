@@ -53,6 +53,9 @@ function makeService(config = makeConfig()) {
     searchByFilters: jest.fn().mockResolvedValue([]),
     searchSemantic: jest.fn().mockResolvedValue([]),
     searchByAddress: jest.fn().mockResolvedValue([]),
+    listAvailableZones: jest
+      .fn()
+      .mockResolvedValue(['Nordelta', 'Palermo', 'San Isidro']),
   };
   const leads = { saveLead: jest.fn().mockResolvedValue({ id: 'lead-1' }) };
   const notifications = {
@@ -121,7 +124,7 @@ describe('AgentService', () => {
     const args = mockCreate.mock.calls[0][0];
     expect(args.model).toBe(DEFAULT_AGENT_MODEL);
     expect(args.system).toBe(SYSTEM_PROMPT);
-    expect(args.tools).toHaveLength(5);
+    expect(args.tools).toHaveLength(6);
   });
 
   it('honors the ANTHROPIC_MODEL override', async () => {
@@ -197,7 +200,7 @@ describe('AgentService', () => {
       .mockResolvedValueOnce(
         toolUseResponse('search_properties_by_filters', {
           operation: 'rent',
-          zone: 'Palermo',
+          zones: ['Palermo'],
         }),
       )
       .mockResolvedValueOnce(textResponse('Encontré 3 opciones en Palermo.'));
@@ -208,10 +211,24 @@ describe('AgentService', () => {
     expect(reply).toBe('Encontré 3 opciones en Palermo.');
     expect(properties.searchByFilters).toHaveBeenCalledWith('agency-1', {
       operation: 'rent',
-      zone: 'Palermo',
+      zones: ['Palermo'],
     });
     // second call carries the assistant tool_use + the user tool_result
     expect(mockCreate.mock.calls[1][0].messages).toHaveLength(3);
+  });
+
+  it('resolves broad regions via list_available_zones', async () => {
+    mockCreate
+      .mockResolvedValueOnce(toolUseResponse('list_available_zones', {}))
+      .mockResolvedValueOnce(
+        textResponse('En zona norte tengo un par de casas.'),
+      );
+    const { service, properties } = makeService();
+
+    const reply = await service.processMessage(baseInput);
+
+    expect(reply).toBe('En zona norte tengo un par de casas.');
+    expect(properties.listAvailableZones).toHaveBeenCalledWith('agency-1');
   });
 
   it('injects the client phone into save_lead (never trusts the model)', async () => {

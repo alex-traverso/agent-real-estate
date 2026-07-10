@@ -8,7 +8,10 @@ import type { Enums } from 'types';
 export interface PropertyFilters {
   operation?: Enums<'operation_type'>; // 'rent' | 'sale' | 'temporary'
   type?: Enums<'property_type'>; // 'house' | 'apartment' | 'ph' | 'office' | 'land'
-  zone?: string;
+  // One or more neighborhoods; a property matches if its zone matches any of them.
+  // Broad regions (e.g. "zona norte") are resolved by the agent into the actual
+  // neighborhoods via the list_available_zones tool — never a hardcoded map.
+  zones?: string[];
   rooms?: number;
   // Price only applies together with currency (comparing across currencies is
   // meaningless), so both must be provided for the price filter to take effect.
