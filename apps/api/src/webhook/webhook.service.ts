@@ -3,8 +3,9 @@ import { WhatsAppService } from '../messaging/whatsapp.service';
 import { AgencyService } from '../agency/agency.service';
 import { ConversationService } from '../conversation/conversation.service';
 import { AgentService } from '../agent/agent.service';
+import { RateLimitService } from '../rate-limit/rate-limit.service';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
-import { FALLBACK_REPLY_ES } from './webhook.constants';
+import { FALLBACK_REPLY_ES, RATE_LIMIT_REPLY_ES } from './webhook.constants';
 import { isTextMessage } from './types/whatsapp-webhook.types';
 import type {
   WhatsAppMessage,
@@ -13,10 +14,12 @@ import type {
 } from './types/whatsapp-webhook.types';
 
 /**
- * Orchestrates inbound WhatsApp webhook events: resolves the tenant, loads or
- * creates the conversation, persists the exchange, and replies. The reply is
- * produced by Luca (the Claude agent); if the agent fails, a generic Spanish
- * fallback is sent so the client never sees an internal error.
+ * Orchestrates inbound WhatsApp webhook events: resolves the tenant, checks
+ * the rate limit, loads or creates the conversation, persists the exchange,
+ * and replies. The reply is produced by Luca (the Claude agent); if the
+ * agent fails, a generic Spanish fallback is sent so the client never sees
+ * an internal error. A phone over its rate limit never reaches the agent at
+ * all — see RateLimitService.
  */
 @Injectable()
 export class WebhookService {
@@ -27,6 +30,7 @@ export class WebhookService {
     private readonly agencyService: AgencyService,
     private readonly conversationService: ConversationService,
     private readonly agent: AgentService,
+    private readonly rateLimit: RateLimitService,
   ) {}
 
   /**
@@ -79,6 +83,18 @@ export class WebhookService {
             await this.agencyService.resolveIdByPhoneNumberId(phoneNumberId);
           if (!agencyId) {
             continue; // unattributable — AgencyService already logged it
+          }
+
+          const allowed = await this.rateLimit.checkAndIncrement(
+            agencyId,
+            message.from,
+          );
+          if (!allowed) {
+            // First cost/spam barrier: no ConversationService, no
+            // AgentService (Claude) call, nothing persisted — the cheapest
+            // possible path for a phone over its message limit.
+            await this.whatsapp.sendText(message.from, RATE_LIMIT_REPLY_ES);
+            continue;
           }
 
           await this.replyAndPersist(agencyId, message);

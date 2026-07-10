@@ -1,9 +1,10 @@
 import { WebhookService } from './webhook.service';
-import { FALLBACK_REPLY_ES } from './webhook.constants';
+import { FALLBACK_REPLY_ES, RATE_LIMIT_REPLY_ES } from './webhook.constants';
 import type { WhatsAppService } from '../messaging/whatsapp.service';
 import type { AgencyService } from '../agency/agency.service';
 import type { ConversationService } from '../conversation/conversation.service';
 import type { AgentService } from '../agent/agent.service';
+import type { RateLimitService } from '../rate-limit/rate-limit.service';
 import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
 
 const AGENT_REPLY = 'Hola, soy Luca. ¿Buscás alquilar o comprar?';
@@ -14,7 +15,9 @@ const CONVERSATION = {
   messages: [],
 };
 
-function createService(opts: { agencyId?: string | null } = {}) {
+function createService(
+  opts: { agencyId?: string | null; rateLimitAllowed?: boolean } = {},
+) {
   const sendText = jest.fn().mockResolvedValue('wamid.OUT');
   const resolveIdByPhoneNumberId = jest
     .fn()
@@ -24,6 +27,9 @@ function createService(opts: { agencyId?: string | null } = {}) {
   const getOrCreateActive = jest.fn().mockResolvedValue(CONVERSATION);
   const appendMessages = jest.fn().mockResolvedValue(CONVERSATION);
   const processMessage = jest.fn().mockResolvedValue(AGENT_REPLY);
+  const checkAndIncrement = jest
+    .fn()
+    .mockResolvedValue(opts.rateLimitAllowed ?? true);
 
   const whatsapp = { sendText } as unknown as WhatsAppService;
   const agencyService = {
@@ -34,6 +40,7 @@ function createService(opts: { agencyId?: string | null } = {}) {
     appendMessages,
   } as unknown as ConversationService;
   const agent = { processMessage } as unknown as AgentService;
+  const rateLimit = { checkAndIncrement } as unknown as RateLimitService;
 
   return {
     service: new WebhookService(
@@ -41,12 +48,14 @@ function createService(opts: { agencyId?: string | null } = {}) {
       agencyService,
       conversationService,
       agent,
+      rateLimit,
     ),
     sendText,
     resolveIdByPhoneNumberId,
     getOrCreateActive,
     appendMessages,
     processMessage,
+    checkAndIncrement,
   };
 }
 
@@ -177,6 +186,32 @@ describe('WebhookService', () => {
       expect(getOrCreateActive).not.toHaveBeenCalled();
       expect(appendMessages).not.toHaveBeenCalled();
       expect(sendText).not.toHaveBeenCalled();
+    });
+
+    it('sends the rate-limit reply and never reaches the agent when the phone is over its limit', async () => {
+      const {
+        service,
+        sendText,
+        checkAndIncrement,
+        getOrCreateActive,
+        appendMessages,
+        processMessage,
+      } = createService({ rateLimitAllowed: false });
+
+      await service.processInbound(textPayload());
+
+      expect(checkAndIncrement).toHaveBeenCalledWith(
+        'agency-1',
+        '5491122223333',
+      );
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(
+        '5491122223333',
+        RATE_LIMIT_REPLY_ES,
+      );
+      expect(getOrCreateActive).not.toHaveBeenCalled();
+      expect(appendMessages).not.toHaveBeenCalled();
+      expect(processMessage).not.toHaveBeenCalled();
     });
 
     it('ignores status-only payloads (no reply storm)', async () => {
