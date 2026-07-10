@@ -79,19 +79,19 @@ This is the single source of truth for what needs to be built. It is organized i
 
 ## Epic 6 — AI Agent Core (Claude Integration)
 
-> **Not built yet.** This is the current frontier of the project — replacing the static placeholder reply with the real agent.
+> **Built.** The static placeholder reply has been replaced by the real agent (Luca), live end-to-end via the webhook.
 
-- [ ] `AgentService` created: orchestrates calls to Claude API (`claude-haiku-4-5`) with tool calling
-- [ ] System prompt written in `apps/api/src/agent/prompts/system.prompt.ts` (Spanish, versioned, never inlined)
-  - [ ] Identity anchoring (Luca's name, tone, "vos", scope)
-  - [ ] Prompt injection defense instructions
-  - [ ] Tool usage guidelines
-  - [ ] Fallback / escalation behavior on failure
-- [ ] Webhook reply seam switched from static placeholder to `AgentService.processMessage()`
-- [ ] Tool-calling loop implemented: Claude → tool_use → execute → tool_result → Claude → final text
-- [ ] SECURITY: confirm no user message content is interpolated directly into the system prompt
-- [ ] SECURITY: confirm injection attempts get polite redirection, never compliance (test with prompts from `SECURITY.md`)
-- [ ] TESTER: injection attempts, tool failure → escalation, normal conversation flow
+- [x] `AgentService` created: orchestrates calls to Claude API (`claude-haiku-4-5`) with tool calling
+- [x] System prompt written in `apps/api/src/agent/prompts/system.prompt.ts` (Spanish, versioned, never inlined)
+  - [x] Identity anchoring (Luca's name, tone, "vos", scope)
+  - [x] Prompt injection defense instructions
+  - [x] Tool usage guidelines
+  - [x] Fallback / escalation behavior on failure
+- [x] Webhook reply seam switched from static placeholder to `AgentService.processMessage()` (generic Spanish fallback on agent failure)
+- [x] Tool-calling loop implemented: Claude → tool_use → execute → tool_result → Claude → final text (bounded by `MAX_TOOL_ITERATIONS`)
+- [x] SECURITY: no user message content is interpolated into the system prompt (unit-tested); lead `phone` is taken from conversation context, never from the model
+- [ ] SECURITY: confirm injection attempts get polite redirection, never compliance — defense is in the prompt; **behavioral verification pending live E2E** with `SECURITY.md` prompts
+- [x] TESTER: tool failure → graceful recovery + normal conversation flow covered (`agent.service.spec.ts`, `webhook.service.spec.ts`); live injection behavior pending E2E
 
 ---
 
@@ -101,25 +101,25 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] `PropertiesService.searchByFilters` — structured search (zone, price, rooms, operation, type), always filtered by `agency_id`
 - [x] `PropertiesService.searchByAddress` — exact/near-exact address lookup
 - [x] Semantic search: `EmbeddingsService` → `search_properties_semantic` RPC → ranked results
-- [ ] Tool definitions created in `apps/api/src/agent/tools/`:
-  - [ ] `search-properties-by-filters.tool.ts`
-  - [ ] `search-properties-semantic.tool.ts`
-  - [ ] `search-property-by-address.tool.ts`
-- [ ] Tool execution logic wired into `AgentService` (not in the tool definition files)
-- [ ] Search strategy from `CLAUDE.md`/`ARCHITECTURE.md` enforced in system prompt (address → filters+semantic rank → semantic-only)
-- [ ] `PropertiesController` — CRUD endpoints for admin panel (create, update, toggle availability)
-- [ ] TESTER: filter search (matches/empty), address search (match/no match), semantic fallback if OpenAI down
+- [x] Tool definitions created in `apps/api/src/agent/tools/`:
+  - [x] `search-properties-by-filters.tool.ts`
+  - [x] `search-properties-semantic.tool.ts`
+  - [x] `search-property-by-address.tool.ts`
+- [x] Tool execution logic wired into `AgentService` (not in the tool definition files)
+- [x] Search strategy from `CLAUDE.md`/`ARCHITECTURE.md` enforced in system prompt (address → filters+semantic rank → semantic-only)
+- [ ] `PropertiesController` — CRUD endpoints for admin panel (create, update, toggle availability) — **deferred to Epic 11**
+- [x] TESTER: filter search (matches/empty), address search (match/no match) at the service level; tool dispatch covered in `agent.service.spec.ts`
 
 ---
 
 ## Epic 8 — Agent Tools: Lead Management & Escalation
 
-- [ ] `LeadsService.saveLead` — validates required fields, inserts filtered by `agency_id`
-- [ ] `LeadsService` / `NotificationsService` — `escalateToAdvisor` saves lead + sends email via Resend
-- [ ] Tool definitions: `save-lead.tool.ts`, `escalate-to-advisor.tool.ts`
-- [ ] `NotificationsService` — Resend integration, non-blocking (failure logged, doesn't block lead save)
-- [ ] `LeadsController` — CRUD/status-update endpoints for admin panel
-- [ ] TESTER: save_lead happy path + missing fields, escalate_to_advisor with Resend down (non-blocking failure)
+- [x] `LeadsService.saveLead` — validates required fields, inserts filtered by `agency_id` (links `conversations.lead_id`)
+- [x] `LeadsService` / `NotificationsService` — `escalate_to_advisor` (composed in `AgentService`) saves lead + emails advisor via Resend
+- [x] Tool definitions: `save-lead.tool.ts`, `escalate-to-advisor.tool.ts`
+- [x] `NotificationsService` — Resend integration, non-blocking (failure logged, doesn't block lead save)
+- [ ] `LeadsController` — CRUD/status-update endpoints for admin panel — **deferred to Epic 11**
+- [x] TESTER: save_lead happy path + missing fields, escalate_to_advisor with Resend down (non-blocking failure)
 
 ---
 

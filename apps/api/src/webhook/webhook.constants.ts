@@ -1,10 +1,10 @@
 /**
- * Temporary auto-reply sent to any inbound text message while Luca (the AI
- * agent) is not wired up yet. This exists only to validate the bidirectional
- * WhatsApp connection end-to-end; it is replaced once the agent goes live.
- * The text is Spanish because it is client-facing (per CLAUDE.md).
+ * Generic Spanish reply sent to the client when the agent (Luca) fails to
+ * produce a response — an API error, a tool loop that never settles, etc. It
+ * never exposes internal error detail (per CLAUDE.md) and points the client to
+ * a human. The text is Spanish because it is client-facing.
  */
-export const PLACEHOLDER_REPLY_ES =
-  '¡Hola! Soy Luca, el asistente virtual de la inmobiliaria. ' +
-  'Estoy en desarrollo en este momento, pero muy pronto voy a poder ayudarte ' +
-  'a encontrar tu próxima propiedad. ¡Gracias por tu paciencia!';
+export const FALLBACK_REPLY_ES =
+  'Perdoná, estoy teniendo un inconveniente para responderte en este momento. ' +
+  'Un asesor se va a poner en contacto con vos a la brevedad. ' +
+  '¡Gracias por tu paciencia!';
