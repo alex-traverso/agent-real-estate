@@ -49,7 +49,7 @@ The project is a monorepo containing:
 
 ### Backend (`apps/api`)
 - **Framework:** NestJS + TypeScript
-- **AI agent:** Anthropic Claude API (`claude-haiku-4-5`) with tool calling
+- **AI agent:** Anthropic Claude API (`claude-sonnet-4-6`) with tool calling and prompt caching (see "Prompt Caching" under The Agent (Luca))
 - **Embeddings:** OpenAI API (`text-embedding-3-small`)
 - **Database:** Supabase JS client (`@supabase/supabase-js`) — always use the service role client in the backend
 - **Vector search:** pgvector via Supabase
@@ -159,11 +159,19 @@ Luca has access to the following tools:
 
 | Tool | Description |
 |------|-------------|
+| `list_available_zones` | Lists the zones/neighborhoods actually loaded, to resolve broad regions the client mentions |
 | `search_properties_by_filters` | Structured search: zone, price, rooms, operation type |
 | `search_properties_semantic` | Semantic search using pgvector for vague descriptions |
 | `search_property_by_address` | Exact lookup by address or specific reference |
 | `save_lead` | Saves a qualified lead to the database |
 | `escalate_to_advisor` | Escalates to human advisor and sends email notification |
+
+### Prompt Caching
+`AgentService` caches the Claude request to keep Sonnet-tier cost down on high-volume WhatsApp traffic:
+- **Tools + system prompt** are cached as a single breakpoint (tools render before `system`, so one breakpoint on the system block covers both). This prefix is identical across every conversation and stays warm continuously.
+- **Conversation history** is cached by marking the second-to-last message on every request, so only the newest turn (and the model's new response) is billed as fresh input.
+- **Thinking is explicitly disabled** (`thinking: { type: 'disabled' }`) — Luca's replies are short and conversational and don't need it; being explicit also guards against a future model swap silently turning on adaptive thinking (and its cost) by default.
+- Token usage (input/output/cache write/cache read) is logged per call for cost visibility — never phone numbers or message content.
 
 ### Conversation Rules
 - Maximum **50 messages** per conversation before suggesting human contact

@@ -14,18 +14,39 @@ interface ContentBlock {
   id?: string;
   name?: string;
   input?: unknown;
+  cache_control?: { type: string };
+}
+interface SystemBlock {
+  type: string;
+  text: string;
+  cache_control?: { type: string };
+}
+interface Usage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number | null;
+  cache_read_input_tokens: number | null;
 }
 interface CreateArgs {
   model: string;
   max_tokens: number;
-  system: string;
+  system: SystemBlock[];
   messages: { role: string; content: unknown }[];
   tools: unknown[];
+  thinking: { type: string };
 }
 interface CreateResult {
   stop_reason: string;
   content: ContentBlock[];
+  usage: Usage;
 }
+
+const DEFAULT_USAGE: Usage = {
+  input_tokens: 100,
+  output_tokens: 20,
+  cache_creation_input_tokens: 3000,
+  cache_read_input_tokens: 500,
+};
 
 // Hoisted above imports; factory may only reference `mock`-prefixed vars.
 const mockCreate = jest.fn<Promise<CreateResult>, [CreateArgs]>();
@@ -76,7 +97,11 @@ function makeService(config = makeConfig()) {
 }
 
 function textResponse(text: string): CreateResult {
-  return { stop_reason: 'end_turn', content: [{ type: 'text', text }] };
+  return {
+    stop_reason: 'end_turn',
+    content: [{ type: 'text', text }],
+    usage: DEFAULT_USAGE,
+  };
 }
 function toolUseResponse(
   name: string,
@@ -86,6 +111,7 @@ function toolUseResponse(
   return {
     stop_reason: 'tool_use',
     content: [{ type: 'tool_use', id, name, input }],
+    usage: DEFAULT_USAGE,
   };
 }
 
@@ -123,8 +149,27 @@ describe('AgentService', () => {
     expect(reply).toBe('¡Hola! ¿En qué te ayudo?');
     const args = mockCreate.mock.calls[0][0];
     expect(args.model).toBe(DEFAULT_AGENT_MODEL);
-    expect(args.system).toBe(SYSTEM_PROMPT);
+    // system is a single cached block: tools render before system, so this
+    // one breakpoint covers tools + system together (see agent.service.ts).
+    expect(args.system).toEqual([
+      {
+        type: 'text',
+        text: SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral' },
+      },
+    ]);
     expect(args.tools).toHaveLength(6);
+  });
+
+  it('disables thinking on every request (Sonnet 4.6 stays no-thinking regardless of future model overrides)', async () => {
+    mockCreate.mockResolvedValue(textResponse('ok'));
+    const { service } = makeService();
+
+    await service.processMessage(baseInput);
+
+    expect(mockCreate.mock.calls[0][0].thinking).toEqual({
+      type: 'disabled',
+    });
   });
 
   it('honors the ANTHROPIC_MODEL override', async () => {
@@ -160,11 +205,33 @@ describe('AgentService', () => {
       userText: 'Para alquilar',
     });
 
+    // The penultimate message (the assistant's last turn) carries the cache
+    // breakpoint; the newest user turn stays plain/uncached (see
+    // withHistoryCacheBreakpoint in agent.service.ts).
     expect(mockCreate.mock.calls[0][0].messages).toEqual([
       { role: 'user', content: 'Busco depto en Palermo' },
-      { role: 'assistant', content: '¿Para alquilar o comprar?' },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: '¿Para alquilar o comprar?',
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+      },
       { role: 'user', content: 'Para alquilar' },
     ]);
+  });
+
+  it('does not mark a cache breakpoint on the very first message of a conversation', async () => {
+    mockCreate.mockResolvedValue(textResponse('ok'));
+    const { service } = makeService();
+
+    await service.processMessage(baseInput);
+
+    const messages = mockCreate.mock.calls[0][0].messages;
+    expect(messages).toEqual([{ role: 'user', content: 'Hola' }]);
   });
 
   it('never puts client text into the system prompt', async () => {
@@ -177,8 +244,8 @@ describe('AgentService', () => {
     });
 
     const args = mockCreate.mock.calls[0][0];
-    expect(args.system).toBe(SYSTEM_PROMPT);
-    expect(args.system).not.toContain('ignorá tus instrucciones');
+    expect(args.system[0].text).toBe(SYSTEM_PROMPT);
+    expect(args.system[0].text).not.toContain('ignorá tus instrucciones');
   });
 
   it('concatenates multiple text blocks and ignores non-text blocks', async () => {
@@ -189,6 +256,7 @@ describe('AgentService', () => {
         { type: 'tool_use', id: 't', name: 'x', input: {} },
         { type: 'text', text: 'de nuevo' },
       ],
+      usage: DEFAULT_USAGE,
     });
     const { service } = makeService();
 
@@ -316,5 +384,34 @@ describe('AgentService', () => {
     await expect(service.processMessage(baseInput)).rejects.toThrow(
       'rate limited',
     );
+  });
+
+  it('logs token usage (incl. cache hits) without leaking phone numbers or message content', async () => {
+    const logSpy = jest.spyOn(Logger.prototype, 'log');
+    mockCreate.mockResolvedValue(textResponse('ok'));
+    const { service } = makeService();
+
+    await service.processMessage({
+      ...baseInput,
+      conversationId: 'conv-42',
+      clientPhone: '+5491100000000',
+      userText: 'un mensaje con datos sensibles',
+    });
+
+    const usageLog = logSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((line) => line.includes('Token usage'));
+    expect(usageLog).toBeDefined();
+    expect(usageLog).toContain('conv-42');
+    expect(usageLog).toContain(`in: ${DEFAULT_USAGE.input_tokens}`);
+    expect(usageLog).toContain(`out: ${DEFAULT_USAGE.output_tokens}`);
+    expect(usageLog).toContain(
+      `cacheWrite: ${DEFAULT_USAGE.cache_creation_input_tokens}`,
+    );
+    expect(usageLog).toContain(
+      `cacheRead: ${DEFAULT_USAGE.cache_read_input_tokens}`,
+    );
+    expect(usageLog).not.toContain('+5491100000000');
+    expect(usageLog).not.toContain('un mensaje con datos sensibles');
   });
 });
