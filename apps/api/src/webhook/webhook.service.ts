@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { WhatsAppService } from '../messaging/whatsapp.service';
 import { AgencyService } from '../agency/agency.service';
 import { ConversationService } from '../conversation/conversation.service';
+import { AgentService } from '../agent/agent.service';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
-import { PLACEHOLDER_REPLY_ES } from './webhook.constants';
+import { FALLBACK_REPLY_ES } from './webhook.constants';
 import { isTextMessage } from './types/whatsapp-webhook.types';
 import type {
   WhatsAppMessage,
@@ -13,9 +14,9 @@ import type {
 
 /**
  * Orchestrates inbound WhatsApp webhook events: resolves the tenant, loads or
- * creates the conversation, persists the exchange, and replies. For now the
- * reply is a fixed placeholder; the agent will plug in where the reply text is
- * produced.
+ * creates the conversation, persists the exchange, and replies. The reply is
+ * produced by Luca (the Claude agent); if the agent fails, a generic Spanish
+ * fallback is sent so the client never sees an internal error.
  */
 @Injectable()
 export class WebhookService {
@@ -25,6 +26,7 @@ export class WebhookService {
     private readonly whatsapp: WhatsAppService,
     private readonly agencyService: AgencyService,
     private readonly conversationService: ConversationService,
+    private readonly agent: AgentService,
   ) {}
 
   /**
@@ -86,10 +88,12 @@ export class WebhookService {
   }
 
   /**
-   * Persists the inbound message, sends the reply, and persists the reply.
-   * The inbound message is saved before sending, so it is not lost if the send
-   * fails. The 50-message cap / escalation (ARCHITECTURE step 7) is not built
-   * yet — see MAX_MESSAGES.
+   * Persists the inbound message, asks the agent for a reply, sends it, and
+   * persists the reply. The inbound message is saved before sending so it is not
+   * lost if the send fails. The prior history is snapshotted before appending
+   * the inbound turn, since the agent expects history that excludes it. The
+   * 50-message cap / escalation (ARCHITECTURE step 7) is not built yet — see
+   * MAX_MESSAGES.
    */
   private async replyAndPersist(
     agencyId: string,
@@ -99,6 +103,10 @@ export class WebhookService {
       agencyId,
       message.from,
     );
+
+    // History as seen by the agent must NOT include the incoming turn yet.
+    const priorHistory =
+      (conversation.messages as unknown as StoredMessage[]) ?? [];
 
     const userMessage: StoredMessage = {
       role: 'user',
@@ -110,16 +118,52 @@ export class WebhookService {
       userMessage,
     ]);
 
-    await this.whatsapp.sendText(message.from, PLACEHOLDER_REPLY_ES);
+    const reply = await this.generateReply(
+      agencyId,
+      conversation.id,
+      message,
+      priorHistory,
+    );
+
+    await this.whatsapp.sendText(message.from, reply);
 
     const assistantMessage: StoredMessage = {
       role: 'assistant',
-      content: PLACEHOLDER_REPLY_ES,
+      content: reply,
       timestamp: new Date().toISOString(),
     };
     await this.conversationService.appendMessages(conversation, [
       assistantMessage,
     ]);
+  }
+
+  /**
+   * Runs the agent to produce Luca's reply. Any agent failure is logged and
+   * converted to a generic Spanish fallback — the internal error is never
+   * surfaced to the client.
+   */
+  private async generateReply(
+    agencyId: string,
+    conversationId: string,
+    message: WhatsAppTextMessage,
+    priorHistory: StoredMessage[],
+  ): Promise<string> {
+    try {
+      return await this.agent.processMessage({
+        agencyId,
+        conversationId,
+        clientPhone: message.from,
+        history: priorHistory,
+        userText: message.text.body,
+      });
+    } catch (error) {
+      this.logger.error(
+        `[WebhookService] Agent failed, sending fallback | conversationId: ${conversationId} | error: ${
+          error instanceof Error ? error.message : 'unknown'
+        }`,
+      );
+      return FALLBACK_REPLY_ES;
+    }
   }
 
   private logMessage(message: WhatsAppMessage): void {

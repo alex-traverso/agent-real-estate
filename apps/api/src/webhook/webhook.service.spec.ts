@@ -1,11 +1,18 @@
 import { WebhookService } from './webhook.service';
-import { PLACEHOLDER_REPLY_ES } from './webhook.constants';
+import { FALLBACK_REPLY_ES } from './webhook.constants';
 import type { WhatsAppService } from '../messaging/whatsapp.service';
 import type { AgencyService } from '../agency/agency.service';
 import type { ConversationService } from '../conversation/conversation.service';
+import type { AgentService } from '../agent/agent.service';
 import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
 
-const CONVERSATION = { id: 'conv-1', agency_id: 'agency-1', message_count: 0 };
+const AGENT_REPLY = 'Hola, soy Luca. ¿Buscás alquilar o comprar?';
+const CONVERSATION = {
+  id: 'conv-1',
+  agency_id: 'agency-1',
+  message_count: 0,
+  messages: [],
+};
 
 function createService(opts: { agencyId?: string | null } = {}) {
   const sendText = jest.fn().mockResolvedValue('wamid.OUT');
@@ -16,6 +23,7 @@ function createService(opts: { agencyId?: string | null } = {}) {
     );
   const getOrCreateActive = jest.fn().mockResolvedValue(CONVERSATION);
   const appendMessages = jest.fn().mockResolvedValue(CONVERSATION);
+  const processMessage = jest.fn().mockResolvedValue(AGENT_REPLY);
 
   const whatsapp = { sendText } as unknown as WhatsAppService;
   const agencyService = {
@@ -25,13 +33,20 @@ function createService(opts: { agencyId?: string | null } = {}) {
     getOrCreateActive,
     appendMessages,
   } as unknown as ConversationService;
+  const agent = { processMessage } as unknown as AgentService;
 
   return {
-    service: new WebhookService(whatsapp, agencyService, conversationService),
+    service: new WebhookService(
+      whatsapp,
+      agencyService,
+      conversationService,
+      agent,
+    ),
     sendText,
     resolveIdByPhoneNumberId,
     getOrCreateActive,
     appendMessages,
+    processMessage,
   };
 }
 
@@ -98,13 +113,14 @@ const statusPayload: WhatsAppWebhookPayload = {
 
 describe('WebhookService', () => {
   describe('processInbound', () => {
-    it('resolves tenant, persists inbound + reply, and sends the placeholder', async () => {
+    it('resolves tenant, persists inbound + reply, and sends the agent reply', async () => {
       const {
         service,
         sendText,
         resolveIdByPhoneNumberId,
         getOrCreateActive,
         appendMessages,
+        processMessage,
       } = createService();
 
       await service.processInbound(textPayload());
@@ -114,10 +130,14 @@ describe('WebhookService', () => {
         'agency-1',
         '5491122223333',
       );
-      expect(sendText).toHaveBeenCalledWith(
-        '5491122223333',
-        PLACEHOLDER_REPLY_ES,
-      );
+      expect(processMessage).toHaveBeenCalledWith({
+        agencyId: 'agency-1',
+        conversationId: 'conv-1',
+        clientPhone: '5491122223333',
+        history: [],
+        userText: 'Hola',
+      });
+      expect(sendText).toHaveBeenCalledWith('5491122223333', AGENT_REPLY);
 
       expect(appendMessages).toHaveBeenCalledTimes(2);
       expect(appendMessages).toHaveBeenNthCalledWith(1, expect.anything(), [
@@ -128,9 +148,22 @@ describe('WebhookService', () => {
         }),
       ]);
       expect(appendMessages).toHaveBeenNthCalledWith(2, expect.anything(), [
+        expect.objectContaining({ role: 'assistant', content: AGENT_REPLY }),
+      ]);
+    });
+
+    it('sends the generic fallback and persists it when the agent fails', async () => {
+      const { service, sendText, appendMessages, processMessage } =
+        createService();
+      processMessage.mockRejectedValueOnce(new Error('anthropic down'));
+
+      await service.processInbound(textPayload());
+
+      expect(sendText).toHaveBeenCalledWith('5491122223333', FALLBACK_REPLY_ES);
+      expect(appendMessages).toHaveBeenNthCalledWith(2, expect.anything(), [
         expect.objectContaining({
           role: 'assistant',
-          content: PLACEHOLDER_REPLY_ES,
+          content: FALLBACK_REPLY_ES,
         }),
       ]);
     });
