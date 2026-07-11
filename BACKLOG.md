@@ -40,7 +40,7 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] Permanent System User token created in Meta Business Manager (correct scopes, no expiry)
 - [x] Webhook verification endpoint (GET, `hub.challenge`) working with `META_VERIFY_TOKEN`
 - [x] Webhook receives and parses inbound messages from Meta
-- [ ] Idempotent handling of duplicate messages (Meta may resend) — **not done**, `TODO(idempotency)` still open in `webhook.service.ts`
+- [x] Idempotent handling of duplicate messages (Meta may resend): `IdempotencyService.checkAndMark` (new `idempotency/` module) dedups on `message.id` (wamid) via `processed_messages` (`UNIQUE(agency_id, message_id)` is the atomic barrier), called from `WebhookService.processInbound` right after tenant resolution, before the rate limit — a redelivery is skipped silently (no reply, no rate-limit consumption, no persistence, no Claude call). Fails open on a non-conflict DB error, same posture as `RateLimitService`. Retention (pruning old rows) is a deferred follow-up — `pg_cron` snippet documented in the migration.
 - [x] SECURITY: confirm invalid/missing signature returns 403 immediately, before any other processing
 - [x] TESTER: unit tests for valid / invalid / missing signature cases (`webhook.guard.spec.ts`)
 

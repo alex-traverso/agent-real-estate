@@ -5,6 +5,7 @@ import { ConversationService } from '../conversation/conversation.service';
 import { AgentService } from '../agent/agent.service';
 import { RateLimitService } from '../rate-limit/rate-limit.service';
 import { EscalationService } from '../escalation/escalation.service';
+import { IdempotencyService } from '../idempotency/idempotency.service';
 import { MAX_MESSAGES } from '../conversation/conversation.constants';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
 import type { TokenUsage } from '../conversation/types/token-usage.type';
@@ -26,12 +27,13 @@ import type {
 type Conversation = Tables<'conversations'>;
 
 /**
- * Orchestrates inbound WhatsApp webhook events: resolves the tenant, checks
- * the rate limit, loads or creates the conversation, persists the exchange,
- * and replies. The reply is produced by Luca (the Claude agent); if the
- * agent fails, a generic Spanish fallback is sent so the client never sees
- * an internal error. A phone over its rate limit never reaches the agent at
- * all — see RateLimitService.
+ * Orchestrates inbound WhatsApp webhook events: resolves the tenant, dedups
+ * Meta redeliveries, checks the rate limit, loads or creates the
+ * conversation, persists the exchange, and replies. The reply is produced by
+ * Luca (the Claude agent); if the agent fails, a generic Spanish fallback is
+ * sent so the client never sees an internal error. A message already
+ * processed (see IdempotencyService) or a phone over its rate limit never
+ * reaches the agent at all — see RateLimitService.
  */
 @Injectable()
 export class WebhookService {
@@ -44,6 +46,7 @@ export class WebhookService {
     private readonly agent: AgentService,
     private readonly rateLimit: RateLimitService,
     private readonly escalation: EscalationService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   /**
@@ -79,8 +82,6 @@ export class WebhookService {
         for (const message of value?.messages ?? []) {
           this.logMessage(message);
 
-          // TODO(idempotency): dedup on message.id — Meta retries can redeliver
-          // the same message.
           if (!isTextMessage(message)) {
             continue; // images/audio/location/interactive: no reply in this step
           }
@@ -96,6 +97,16 @@ export class WebhookService {
             await this.agencyService.resolveIdByPhoneNumberId(phoneNumberId);
           if (!agencyId) {
             continue; // unattributable — AgencyService already logged it
+          }
+
+          const firstDelivery = await this.idempotency.checkAndMark(
+            agencyId,
+            message.id,
+          );
+          if (!firstDelivery) {
+            // Meta redelivered a message we already handled — skip silently:
+            // no reply, no rate-limit consumption, no persistence, no Claude call.
+            continue;
           }
 
           const allowed = await this.rateLimit.checkAndIncrement(

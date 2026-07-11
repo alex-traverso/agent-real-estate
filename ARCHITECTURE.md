@@ -78,16 +78,23 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 5. WebhookService extracts the message payload, resolves the tenant
    (metadata.phone_number_id → agency_id, via AgencyService)
          ↓
-6. RateLimitService checks the rate_limits table (agency_id, phone)
+6. IdempotencyService checks the processed_messages table (agency_id,
+   message.id / wamid)
+   → Already processed (Meta redelivery): skip silently — no reply, no
+     rate-limit consumption, no persistence, no AgentService/Claude call
+   → First delivery: insert the record (UNIQUE constraint is the atomic dedup
+     barrier), continue
+         ↓
+7. RateLimitService checks the rate_limits table (agency_id, phone)
    → phone >= 20 messages in the last 60s: send a polite WhatsApp reply
      directly and stop — no ConversationService, no AgentService/Claude call
    → OK: upsert the window (increment or reset), continue
          ↓
-7. ConversationService loads or creates conversation
+8. ConversationService loads or creates conversation
    → New phone or session expired (8h): create new conversation
    → Existing: load full message history
          ↓
-8. Check message_count >= 50 (right after loading the conversation, before
+9. Check message_count >= 50 (right after loading the conversation, before
    persisting the inbound turn)
    → Yes: EscalationService saves a lead + notifies the advisor,
      ConversationService.markEscalated flips status to 'escalated', client
@@ -97,27 +104,27 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
      and the conversation stays 'active' so the next message retries.
    → No: continue
          ↓
-9. AgentService calls Claude API
+10. AgentService calls Claude API
    → Sends: system prompt + full conversation history + available tools
    → Claude responds with text or tool call
          ↓
-10. If Claude calls a tool:
+11. If Claude calls a tool:
    → search_properties_by_filters   → PropertiesService → Supabase query
    → search_properties_semantic     → EmbeddingsService (OpenAI) → pgvector RPC
    → search_property_by_address     → PropertiesService → Supabase query
    → save_lead                      → LeadsService → Supabase insert
    → escalate_to_advisor            → EscalationService (LeadsService +
                                        AgencyService + NotificationsService) —
-                                       the same service the step-8 cap
+                                       the same service the step-9 cap
                                        handoff uses, one escalation path
    → Tool result sent back to Claude
    → Claude generates final response
          ↓
-11. ConversationService saves updated history to Supabase, folding the turn's
+12. ConversationService saves updated history to Supabase, folding the turn's
     accumulated token usage into the same write (conversations.total_*_tokens,
     for cost-per-lead visibility)
           ↓
-12. WebhookService calls WhatsAppService (messaging module) to send the
+13. WebhookService calls WhatsAppService (messaging module) to send the
     response to the client via Meta Cloud API
 
 > **Why rate limiting isn't a `Guard`:** step 4 is fire-and-forget — the
@@ -130,12 +137,14 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 
 > **Current state:** the agent is **live**. The webhook receives and verifies
 > messages, resolves the tenant from `metadata.phone_number_id` (→
-> `agencies.whatsapp_phone_number_id`, via AgencyService), checks the rate
-> limit (`RateLimitService`, 20 msg/min per phone, persisted in `rate_limits`
-> so it survives restarts), loads/creates the conversation (ConversationService,
-> 8h session timeout), checks the 50-message cap (escalates via
-> `EscalationService` + `ConversationService.markEscalated` and returns early
-> if hit — see step 8), persists the inbound turn, then delegates the reply to
+> `agencies.whatsapp_phone_number_id`, via AgencyService), dedups Meta
+> redeliveries (`IdempotencyService`, keyed by `message.id` in
+> `processed_messages` — see step 6), checks the rate limit (`RateLimitService`,
+> 20 msg/min per phone, persisted in `rate_limits` so it survives restarts),
+> loads/creates the conversation (ConversationService, 8h session timeout),
+> checks the 50-message cap (escalates via `EscalationService` +
+> `ConversationService.markEscalated` and returns early if hit — see step 9),
+> persists the inbound turn, then delegates the reply to
 > `AgentService.processMessage` (Luca) and sends it via WhatsAppService. On any
 > agent failure a generic Spanish fallback is sent — the internal error is
 > never surfaced to the client. History is stored
@@ -242,6 +251,13 @@ src/
 │   │                                 Full Request Flow above for why)
 │   └── rate-limit.constants.ts     # Max messages (20) + window (60s)
 │
+├── idempotency/
+│   ├── idempotency.module.ts
+│   └── idempotency.service.ts      # Dedups on message.id via processed_messages
+│                                      (UNIQUE agency_id+message_id); called from
+│                                      WebhookService right after tenant
+│                                      resolution, before the rate limit
+│
 └── common/
     ├── supabase/
     │   └── supabase.service.ts     # Singleton Supabase client (service role)
@@ -289,7 +305,8 @@ agencies
   │     └── properties (property_id FK, optional)
   ├── conversations (agency_id FK)
   │     └── leads (lead_id FK, optional)
-  └── rate_limits (agency_id FK)
+  ├── rate_limits (agency_id FK)
+  └── processed_messages (agency_id FK)
 ```
 
 ### Table Summary
@@ -302,6 +319,7 @@ agencies
 | `leads` | Qualified prospects | `agency_id`, `phone`, `status`, `property_id` |
 | `conversations` | WhatsApp history | `agency_id`, `phone`, `messages` (JSONB), `message_count`, `total_*_tokens` (accumulated Claude usage) |
 | `rate_limits` | Rate limiting state | `agency_id`, `phone`, `window_start`, `message_count` |
+| `processed_messages` | Idempotency (Meta redelivery dedup) | `agency_id`, `message_id` (`UNIQUE` together), `created_at` |
 
 `pgvector` is installed in the `extensions` schema (not `public`), per Supabase's security linter recommendations.
 
