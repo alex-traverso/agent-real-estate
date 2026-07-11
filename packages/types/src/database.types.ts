@@ -124,6 +124,10 @@ export type Database = {
           messages: Json
           phone: string
           status: Database["public"]["Enums"]["conversation_status"] | null
+          total_cache_creation_tokens: number
+          total_cache_read_tokens: number
+          total_input_tokens: number
+          total_output_tokens: number
           updated_at: string | null
         }
         Insert: {
@@ -136,6 +140,10 @@ export type Database = {
           messages?: Json
           phone: string
           status?: Database["public"]["Enums"]["conversation_status"] | null
+          total_cache_creation_tokens?: number
+          total_cache_read_tokens?: number
+          total_input_tokens?: number
+          total_output_tokens?: number
           updated_at?: string | null
         }
         Update: {
@@ -148,6 +156,10 @@ export type Database = {
           messages?: Json
           phone?: string
           status?: Database["public"]["Enums"]["conversation_status"] | null
+          total_cache_creation_tokens?: number
+          total_cache_read_tokens?: number
+          total_input_tokens?: number
+          total_output_tokens?: number
           updated_at?: string | null
         }
         Relationships: [

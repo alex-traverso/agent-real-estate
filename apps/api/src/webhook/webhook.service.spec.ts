@@ -14,6 +14,12 @@ import type { EscalationService } from '../escalation/escalation.service';
 import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
 
 const AGENT_REPLY = 'Hola, soy Luca. ¿Buscás alquilar o comprar?';
+const SAMPLE_USAGE = {
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheCreationTokens: 3000,
+  cacheReadTokens: 500,
+};
 
 function conversation(messageCount = 0) {
   return {
@@ -42,7 +48,9 @@ function createService(
   const getOrCreateActive = jest.fn().mockResolvedValue(CONVERSATION);
   const appendMessages = jest.fn().mockResolvedValue(CONVERSATION);
   const markEscalated = jest.fn().mockResolvedValue(undefined);
-  const processMessage = jest.fn().mockResolvedValue(AGENT_REPLY);
+  const processMessage = jest
+    .fn()
+    .mockResolvedValue({ reply: AGENT_REPLY, usage: SAMPLE_USAGE });
   const checkAndIncrement = jest
     .fn()
     .mockResolvedValue(opts.rateLimitAllowed ?? true);
@@ -180,12 +188,18 @@ describe('WebhookService', () => {
           whatsapp_message_id: 'wamid.ABC',
         }),
       ]);
-      expect(appendMessages).toHaveBeenNthCalledWith(2, expect.anything(), [
-        expect.objectContaining({ role: 'assistant', content: AGENT_REPLY }),
-      ]);
+      // The assistant turn is persisted together with the tokens it cost.
+      expect(appendMessages).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        [expect.objectContaining({ role: 'assistant', content: AGENT_REPLY })],
+        SAMPLE_USAGE,
+      );
+      // The inbound user turn carries no usage.
+      expect(appendMessages.mock.calls[0]).toHaveLength(2);
     });
 
-    it('sends the generic fallback and persists it when the agent fails', async () => {
+    it('sends the generic fallback and persists it (with no usage) when the agent fails', async () => {
       const { service, sendText, appendMessages, processMessage } =
         createService();
       processMessage.mockRejectedValueOnce(new Error('anthropic down'));
@@ -193,12 +207,18 @@ describe('WebhookService', () => {
       await service.processInbound(textPayload());
 
       expect(sendText).toHaveBeenCalledWith('5491122223333', FALLBACK_REPLY_ES);
-      expect(appendMessages).toHaveBeenNthCalledWith(2, expect.anything(), [
-        expect.objectContaining({
-          role: 'assistant',
-          content: FALLBACK_REPLY_ES,
-        }),
-      ]);
+      // Fallback turn never reached Claude, so no token totals are recorded.
+      expect(appendMessages).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        [
+          expect.objectContaining({
+            role: 'assistant',
+            content: FALLBACK_REPLY_ES,
+          }),
+        ],
+        undefined,
+      );
     });
 
     it('does not send or persist when the tenant cannot be resolved', async () => {
