@@ -5,6 +5,7 @@ import { PropertiesService } from '../properties/properties.service';
 import { LeadsService } from '../leads/leads.service';
 import { EscalationService } from '../escalation/escalation.service';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
+import type { TokenUsage } from '../conversation/types/token-usage.type';
 import type { SaveLeadInput } from '../leads/types/lead-input.type';
 import {
   DEFAULT_AGENT_MODEL,
@@ -31,6 +32,16 @@ export interface ProcessMessageInput {
   /** Prior turns, NOT including `userText`. */
   history: StoredMessage[];
   userText: string;
+}
+
+/**
+ * Luca's reply plus the token usage accumulated while producing it (summed
+ * across every Claude call the tool loop made this turn). The caller persists
+ * `usage` onto the conversation for cost-per-lead visibility.
+ */
+export interface ProcessMessageResult {
+  reply: string;
+  usage: TokenUsage;
 }
 
 type ToolContext = Pick<
@@ -86,7 +97,9 @@ export class AgentService {
    * `MAX_TOOL_ITERATIONS`; throws if the API fails or the loop never settles,
    * so the caller (the webhook seam) can send a generic fallback.
    */
-  async processMessage(input: ProcessMessageInput): Promise<string> {
+  async processMessage(
+    input: ProcessMessageInput,
+  ): Promise<ProcessMessageResult> {
     const ctx: ToolContext = {
       agencyId: input.agencyId,
       conversationId: input.conversationId,
@@ -101,11 +114,21 @@ export class AgentService {
       { role: 'user', content: input.userText },
     ];
 
+    // Running total across every Claude call this turn makes (the tool loop can
+    // call the API multiple times); the caller persists it onto the conversation.
+    const usage: TokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    };
+
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       const response = await this.createMessage(messages, ctx.conversationId);
+      this.accumulateUsage(usage, response.usage);
 
       if (response.stop_reason !== 'tool_use') {
-        return this.extractText(response);
+        return { reply: this.extractText(response), usage };
       }
 
       messages.push({ role: 'assistant', content: response.content });
@@ -211,6 +234,17 @@ export class AgentService {
         `cacheWrite: ${usage.cache_creation_input_tokens ?? 0} | ` +
         `cacheRead: ${usage.cache_read_input_tokens ?? 0}`,
     );
+  }
+
+  /**
+   * Adds one Claude call's usage into the running per-turn total. Cache fields
+   * are `?? 0` (absent when nothing was cached), same guard as logUsage.
+   */
+  private accumulateUsage(total: TokenUsage, usage: Anthropic.Usage): void {
+    total.inputTokens += usage.input_tokens;
+    total.outputTokens += usage.output_tokens;
+    total.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+    total.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
   }
 
   /** Executes every tool_use block in a response, returning their tool_result blocks. */

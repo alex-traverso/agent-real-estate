@@ -64,6 +64,7 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] `message_count` cap at 50 enforced in `WebhookService.replyAndPersist`, checked right after loading the conversation, before the agent (Claude) is ever called
 - [x] On reaching 50 messages → `EscalationService` (new shared module: `LeadsService` + `AgencyService` + `NotificationsService`) saves a lead + notifies the advisor, `ConversationService.markEscalated` flips status to `'escalated'` — same escalation path the agent's `escalate_to_advisor` tool uses, not a separate one
 - [x] TESTER: new conversation, continued conversation (<8h), expired conversation (>8h) — `conversation.service.spec.ts`; message-count boundary (at cap, past cap, under cap, escalation failure fail-soft) — `webhook.service.spec.ts`; `EscalationService` itself — `escalation.service.spec.ts`
+- [x] Per-conversation token usage persisted (`conversations.total_input_tokens` / `total_output_tokens` / `total_cache_creation_tokens` / `total_cache_read_tokens`, `BIGINT NOT NULL DEFAULT 0`): `AgentService.processMessage` accumulates usage across the tool loop and returns `{ reply, usage }`; `ConversationService.appendMessages` folds it into the assistant-turn write; fallback turns (no Claude call) record nothing — for cost-per-lead visibility without scraping logs
 
 ---
 

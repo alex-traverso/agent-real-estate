@@ -139,7 +139,7 @@ describe('AgentService', () => {
     mockCreate.mockResolvedValue(textResponse('¡Hola! ¿En qué te ayudo?'));
     const { service } = makeService();
 
-    const reply = await service.processMessage(baseInput);
+    const { reply } = await service.processMessage(baseInput);
 
     expect(reply).toBe('¡Hola! ¿En qué te ayudo?');
     const args = mockCreate.mock.calls[0][0];
@@ -255,7 +255,8 @@ describe('AgentService', () => {
     });
     const { service } = makeService();
 
-    expect(await service.processMessage(baseInput)).toBe('Hola de nuevo');
+    const { reply } = await service.processMessage(baseInput);
+    expect(reply).toBe('Hola de nuevo');
   });
 
   it('runs a tool call then returns the follow-up text', async () => {
@@ -269,7 +270,7 @@ describe('AgentService', () => {
       .mockResolvedValueOnce(textResponse('Encontré 3 opciones en Palermo.'));
     const { service, properties } = makeService();
 
-    const reply = await service.processMessage(baseInput);
+    const { reply } = await service.processMessage(baseInput);
 
     expect(reply).toBe('Encontré 3 opciones en Palermo.');
     expect(properties.searchByFilters).toHaveBeenCalledWith('agency-1', {
@@ -280,6 +281,62 @@ describe('AgentService', () => {
     expect(mockCreate.mock.calls[1][0].messages).toHaveLength(3);
   });
 
+  it('returns the usage of a single-call turn', async () => {
+    mockCreate.mockResolvedValue(textResponse('ok'));
+    const { service } = makeService();
+
+    const { usage } = await service.processMessage(baseInput);
+
+    expect(usage).toEqual({
+      inputTokens: DEFAULT_USAGE.input_tokens,
+      outputTokens: DEFAULT_USAGE.output_tokens,
+      cacheCreationTokens: DEFAULT_USAGE.cache_creation_input_tokens,
+      cacheReadTokens: DEFAULT_USAGE.cache_read_input_tokens,
+    });
+  });
+
+  it('accumulates usage across every Claude call the tool loop makes', async () => {
+    // Two Claude calls this turn (tool_use → text), each billing DEFAULT_USAGE.
+    mockCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('search_properties_by_filters', { zones: ['Palermo'] }),
+      )
+      .mockResolvedValueOnce(textResponse('Encontré opciones.'));
+    const { service } = makeService();
+
+    const { usage } = await service.processMessage(baseInput);
+
+    expect(usage).toEqual({
+      inputTokens: DEFAULT_USAGE.input_tokens * 2,
+      outputTokens: DEFAULT_USAGE.output_tokens * 2,
+      cacheCreationTokens: (DEFAULT_USAGE.cache_creation_input_tokens ?? 0) * 2,
+      cacheReadTokens: (DEFAULT_USAGE.cache_read_input_tokens ?? 0) * 2,
+    });
+  });
+
+  it('treats absent cache usage fields as zero when accumulating', async () => {
+    mockCreate.mockResolvedValue({
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: 'ok' }],
+      usage: {
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_creation_input_tokens: null,
+        cache_read_input_tokens: null,
+      },
+    });
+    const { service } = makeService();
+
+    const { usage } = await service.processMessage(baseInput);
+
+    expect(usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    });
+  });
+
   it('resolves broad regions via list_available_zones', async () => {
     mockCreate
       .mockResolvedValueOnce(toolUseResponse('list_available_zones', {}))
@@ -288,7 +345,7 @@ describe('AgentService', () => {
       );
     const { service, properties } = makeService();
 
-    const reply = await service.processMessage(baseInput);
+    const { reply } = await service.processMessage(baseInput);
 
     expect(reply).toBe('En zona norte tengo un par de casas.');
     expect(properties.listAvailableZones).toHaveBeenCalledWith('agency-1');
@@ -345,7 +402,7 @@ describe('AgentService', () => {
     const { service, properties } = makeService();
     properties.searchByFilters.mockRejectedValueOnce(new Error('db down'));
 
-    const reply = await service.processMessage(baseInput);
+    const { reply } = await service.processMessage(baseInput);
 
     expect(reply).toBe('Perdoná, tuve un problema técnico.');
     // messages: [user, assistant(tool_use), user(tool_result)]

@@ -3,6 +3,7 @@ import type { Json, Tables } from 'types';
 import { SupabaseService } from '../common/supabase/supabase.service';
 import { SESSION_TIMEOUT_MS } from './conversation.constants';
 import type { StoredMessage } from './types/stored-message.type';
+import type { TokenUsage } from './types/token-usage.type';
 
 type Conversation = Tables<'conversations'>;
 
@@ -57,12 +58,16 @@ export class ConversationService {
   }
 
   /**
-   * Appends messages to a conversation and bumps its counters. Returns the
+   * Appends messages to a conversation and bumps its counters. When `usage` is
+   * given (the assistant turn), its token totals are folded into the same
+   * UPDATE that bumps `message_count`, so a turn's tokens are persisted without
+   * an extra round-trip. Omit `usage` for the inbound user append. Returns the
    * updated row so callers can chain further appends without re-reading.
    */
   async appendMessages(
     conversation: Conversation,
     newMessages: StoredMessage[],
+    usage?: TokenUsage,
   ): Promise<Conversation> {
     const existing =
       (conversation.messages as unknown as StoredMessage[]) ?? [];
@@ -77,6 +82,17 @@ export class ConversationService {
         message_count: (conversation.message_count ?? 0) + newMessages.length,
         last_message_at: now,
         updated_at: now,
+        ...(usage && {
+          total_input_tokens:
+            (conversation.total_input_tokens ?? 0) + usage.inputTokens,
+          total_output_tokens:
+            (conversation.total_output_tokens ?? 0) + usage.outputTokens,
+          total_cache_creation_tokens:
+            (conversation.total_cache_creation_tokens ?? 0) +
+            usage.cacheCreationTokens,
+          total_cache_read_tokens:
+            (conversation.total_cache_read_tokens ?? 0) + usage.cacheReadTokens,
+        }),
       })
       .eq('id', conversation.id)
       .eq('agency_id', conversation.agency_id)

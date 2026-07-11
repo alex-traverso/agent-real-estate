@@ -171,7 +171,7 @@ Luca has access to the following tools:
 - **Tools + system prompt** are cached as a single breakpoint (tools render before `system`, so one breakpoint on the system block covers both). This prefix is identical across every conversation and stays warm continuously.
 - **Conversation history** is cached by marking the second-to-last message on every request, so only the newest turn (and the model's new response) is billed as fresh input.
 - **Thinking is explicitly disabled** (`thinking: { type: 'disabled' }`) — Luca's replies are short and conversational and don't need it; being explicit also guards against a future model swap silently turning on adaptive thinking (and its cost) by default.
-- Token usage (input/output/cache write/cache read) is logged per call for cost visibility — never phone numbers or message content.
+- Token usage (input/output/cache write/cache read) is logged per call for cost visibility — never phone numbers or message content. It is also **accumulated per turn** (summed across every Claude call the tool loop makes) and **persisted onto the conversation** (`conversations.total_*_tokens`), so cost-per-lead is queryable without scraping logs. `AgentService.processMessage` returns `{ reply, usage }`; the webhook folds `usage` into the assistant-turn write. A turn that never reached Claude (agent failure → fallback) records no tokens.
 
 ### Conversation Rules
 - Maximum **50 messages** per conversation before suggesting human contact

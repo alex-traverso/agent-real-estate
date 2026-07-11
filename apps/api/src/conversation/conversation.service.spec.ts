@@ -39,6 +39,10 @@ function conversationRow(overrides: Record<string, unknown> = {}) {
     last_message_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    total_input_tokens: 0,
+    total_output_tokens: 0,
+    total_cache_creation_tokens: 0,
+    total_cache_read_tokens: 0,
     ...overrides,
   };
 }
@@ -153,6 +157,68 @@ describe('ConversationService', () => {
       );
       expect(builder.eq).toHaveBeenCalledWith('id', 'conv-1');
       expect(builder.eq).toHaveBeenCalledWith('agency_id', 'agency-1');
+    });
+
+    it('folds token usage into the same update when usage is given', async () => {
+      const conversation = conversationRow({
+        id: 'conv-1',
+        message_count: 2,
+        total_input_tokens: 100,
+        total_output_tokens: 20,
+        total_cache_creation_tokens: 3000,
+        total_cache_read_tokens: 500,
+      });
+      const { supabase, builder } = makeClient([
+        { data: conversationRow({ id: 'conv-1' }), error: null },
+      ]);
+      const service = new ConversationService(supabase);
+
+      const newMsg: StoredMessage = {
+        role: 'assistant',
+        content: 'Buenas',
+        timestamp: '2026-07-07T00:00:01.000Z',
+      };
+      await service.appendMessages(conversation as never, [newMsg], {
+        inputTokens: 50,
+        outputTokens: 10,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 2000,
+      });
+
+      expect(builder.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message_count: 3,
+          total_input_tokens: 150,
+          total_output_tokens: 30,
+          total_cache_creation_tokens: 3000,
+          total_cache_read_tokens: 2500,
+        }),
+      );
+    });
+
+    it('does not touch the token columns when no usage is given', async () => {
+      const conversation = conversationRow({ id: 'conv-1', message_count: 1 });
+      const { supabase, builder } = makeClient([
+        { data: conversationRow({ id: 'conv-1' }), error: null },
+      ]);
+      const service = new ConversationService(supabase);
+
+      await service.appendMessages(conversation as never, [
+        {
+          role: 'user',
+          content: 'Hola',
+          timestamp: '2026-07-07T00:00:00.000Z',
+        },
+      ]);
+
+      const calls = builder.update.mock.calls as Array<
+        [Record<string, unknown>]
+      >;
+      const updateArg = calls[0][0];
+      expect(updateArg).not.toHaveProperty('total_input_tokens');
+      expect(updateArg).not.toHaveProperty('total_output_tokens');
+      expect(updateArg).not.toHaveProperty('total_cache_creation_tokens');
+      expect(updateArg).not.toHaveProperty('total_cache_read_tokens');
     });
   });
 

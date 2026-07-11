@@ -7,6 +7,7 @@ import { RateLimitService } from '../rate-limit/rate-limit.service';
 import { EscalationService } from '../escalation/escalation.service';
 import { MAX_MESSAGES } from '../conversation/conversation.constants';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
+import type { TokenUsage } from '../conversation/types/token-usage.type';
 import type { SaveLeadInput } from '../leads/types/lead-input.type';
 import type { Tables } from 'types';
 import {
@@ -151,7 +152,7 @@ export class WebhookService {
       userMessage,
     ]);
 
-    const reply = await this.generateReply(
+    const { reply, usage } = await this.generateReply(
       agencyId,
       conversation.id,
       message,
@@ -165,9 +166,14 @@ export class WebhookService {
       content: reply,
       timestamp: new Date().toISOString(),
     };
-    await this.conversationService.appendMessages(conversation, [
-      assistantMessage,
-    ]);
+    // Persist the assistant turn together with the tokens it cost. On agent
+    // failure `usage` is null (no successful Claude call), so token totals are
+    // left untouched.
+    await this.conversationService.appendMessages(
+      conversation,
+      [assistantMessage],
+      usage ?? undefined,
+    );
   }
 
   /**
@@ -200,31 +206,33 @@ export class WebhookService {
   }
 
   /**
-   * Runs the agent to produce Luca's reply. Any agent failure is logged and
-   * converted to a generic Spanish fallback — the internal error is never
-   * surfaced to the client.
+   * Runs the agent to produce Luca's reply and the tokens it cost. Any agent
+   * failure is logged and converted to a generic Spanish fallback — the
+   * internal error is never surfaced to the client — with `usage: null` so no
+   * token totals are recorded for a turn that never reached Claude.
    */
   private async generateReply(
     agencyId: string,
     conversationId: string,
     message: WhatsAppTextMessage,
     priorHistory: StoredMessage[],
-  ): Promise<string> {
+  ): Promise<{ reply: string; usage: TokenUsage | null }> {
     try {
-      return await this.agent.processMessage({
+      const { reply, usage } = await this.agent.processMessage({
         agencyId,
         conversationId,
         clientPhone: message.from,
         history: priorHistory,
         userText: message.text.body,
       });
+      return { reply, usage };
     } catch (error) {
       this.logger.error(
         `[WebhookService] Agent failed, sending fallback | conversationId: ${conversationId} | error: ${
           error instanceof Error ? error.message : 'unknown'
         }`,
       );
-      return FALLBACK_REPLY_ES;
+      return { reply: FALLBACK_REPLY_ES, usage: null };
     }
   }
 
