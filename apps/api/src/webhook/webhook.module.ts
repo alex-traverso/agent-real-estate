@@ -5,6 +5,7 @@ import { ConversationModule } from '../conversation/conversation.module';
 import { AgentModule } from '../agent/agent.module';
 import { RateLimitModule } from '../rate-limit/rate-limit.module';
 import { EscalationModule } from '../escalation/escalation.module';
+import { IdempotencyModule } from '../idempotency/idempotency.module';
 import { WebhookController } from './webhook.controller';
 import { WebhookSignatureGuard } from './webhook.guard';
 import { WebhookService } from './webhook.service';
@@ -17,6 +18,7 @@ import { WebhookService } from './webhook.service';
     AgentModule,
     RateLimitModule,
     EscalationModule,
+    IdempotencyModule,
   ],
   controllers: [WebhookController],
   providers: [WebhookSignatureGuard, WebhookService],

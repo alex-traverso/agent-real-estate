@@ -245,6 +245,35 @@ export type Database = {
           },
         ]
       }
+      processed_messages: {
+        Row: {
+          agency_id: string
+          created_at: string | null
+          id: string
+          message_id: string
+        }
+        Insert: {
+          agency_id: string
+          created_at?: string | null
+          id?: string
+          message_id: string
+        }
+        Update: {
+          agency_id?: string
+          created_at?: string | null
+          id?: string
+          message_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processed_messages_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       properties: {
         Row: {
           address: string | null

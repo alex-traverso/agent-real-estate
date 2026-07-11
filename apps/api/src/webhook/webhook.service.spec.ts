@@ -11,6 +11,7 @@ import type { ConversationService } from '../conversation/conversation.service';
 import type { AgentService } from '../agent/agent.service';
 import type { RateLimitService } from '../rate-limit/rate-limit.service';
 import type { EscalationService } from '../escalation/escalation.service';
+import type { IdempotencyService } from '../idempotency/idempotency.service';
 import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
 
 const AGENT_REPLY = 'Hola, soy Luca. ¿Buscás alquilar o comprar?';
@@ -36,6 +37,7 @@ function createService(
     rateLimitAllowed?: boolean;
     messageCount?: number;
     escalateFails?: boolean;
+    firstDelivery?: boolean;
   } = {},
 ) {
   const sendText = jest.fn().mockResolvedValue('wamid.OUT');
@@ -57,6 +59,7 @@ function createService(
   const escalate = opts.escalateFails
     ? jest.fn().mockRejectedValue(new Error('resend down'))
     : jest.fn().mockResolvedValue({ id: 'lead-1' });
+  const checkAndMark = jest.fn().mockResolvedValue(opts.firstDelivery ?? true);
 
   const whatsapp = { sendText } as unknown as WhatsAppService;
   const agencyService = {
@@ -70,6 +73,7 @@ function createService(
   const agent = { processMessage } as unknown as AgentService;
   const rateLimit = { checkAndIncrement } as unknown as RateLimitService;
   const escalation = { escalate } as unknown as EscalationService;
+  const idempotency = { checkAndMark } as unknown as IdempotencyService;
 
   return {
     service: new WebhookService(
@@ -79,6 +83,7 @@ function createService(
       agent,
       rateLimit,
       escalation,
+      idempotency,
     ),
     sendText,
     resolveIdByPhoneNumberId,
@@ -88,6 +93,7 @@ function createService(
     processMessage,
     checkAndIncrement,
     escalate,
+    checkAndMark,
   };
 }
 
@@ -162,11 +168,13 @@ describe('WebhookService', () => {
         getOrCreateActive,
         appendMessages,
         processMessage,
+        checkAndMark,
       } = createService();
 
       await service.processInbound(textPayload());
 
       expect(resolveIdByPhoneNumberId).toHaveBeenCalledWith('pnid-123');
+      expect(checkAndMark).toHaveBeenCalledWith('agency-1', 'wamid.ABC');
       expect(getOrCreateActive).toHaveBeenCalledWith(
         'agency-1',
         '5491122223333',
@@ -256,6 +264,35 @@ describe('WebhookService', () => {
       expect(getOrCreateActive).not.toHaveBeenCalled();
       expect(appendMessages).not.toHaveBeenCalled();
       expect(processMessage).not.toHaveBeenCalled();
+    });
+
+    it('skips silently on a Meta redelivery (duplicate message.id), with no reply and no side effects', async () => {
+      const {
+        service,
+        sendText,
+        checkAndIncrement,
+        getOrCreateActive,
+        appendMessages,
+        processMessage,
+      } = createService({ firstDelivery: false });
+
+      await service.processInbound(textPayload());
+
+      expect(sendText).not.toHaveBeenCalled();
+      expect(checkAndIncrement).not.toHaveBeenCalled();
+      expect(getOrCreateActive).not.toHaveBeenCalled();
+      expect(appendMessages).not.toHaveBeenCalled();
+      expect(processMessage).not.toHaveBeenCalled();
+    });
+
+    it('checks idempotency before the rate limit (dedup does not consume the rate-limit budget)', async () => {
+      const { service, checkAndMark, checkAndIncrement } = createService();
+
+      await service.processInbound(textPayload());
+
+      const markOrder = checkAndMark.mock.invocationCallOrder[0];
+      const rateOrder = checkAndIncrement.mock.invocationCallOrder[0];
+      expect(markOrder).toBeLessThan(rateOrder);
     });
 
     it('escalates and hands off when the conversation is at the message cap, without calling the agent', async () => {
