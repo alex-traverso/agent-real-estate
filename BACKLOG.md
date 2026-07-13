@@ -108,7 +108,7 @@ This is the single source of truth for what needs to be built. It is organized i
   - [x] `search-property-by-address.tool.ts`
 - [x] Tool execution logic wired into `AgentService` (not in the tool definition files)
 - [x] Search strategy from `CLAUDE.md`/`ARCHITECTURE.md` enforced in system prompt (address → filters+semantic rank → semantic-only)
-- [ ] `PropertiesController` — CRUD endpoints for admin panel (create, update, toggle availability) — **deferred to Epic 11**
+- [ ] `PropertiesController` — CRUD endpoints for admin panel (create, update, toggle availability) — **deferred to Epic 11**; admin auth foundation (`SupabaseAuthGuard`, `apps/api/src/auth/`) landed ahead of it, see Epic 10 note
 - [x] TESTER: filter search (matches/empty), address search (match/no match) at the service level; tool dispatch covered in `agent.service.spec.ts`
 
 ---
@@ -119,7 +119,7 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] `LeadsService` / `NotificationsService` — `escalate_to_advisor` (composed in `EscalationService`, shared with the Epic 4 message-cap handoff) saves lead + emails advisor via Resend
 - [x] Tool definitions: `save-lead.tool.ts`, `escalate-to-advisor.tool.ts`
 - [x] `NotificationsService` — Resend integration, non-blocking (failure logged, doesn't block lead save)
-- [ ] `LeadsController` — CRUD/status-update endpoints for admin panel — **deferred to Epic 11**
+- [ ] `LeadsController` — CRUD/status-update endpoints for admin panel — **deferred to Epic 11**; admin auth foundation (`SupabaseAuthGuard`, `apps/api/src/auth/`) landed ahead of it, see Epic 10 note
 - [x] TESTER: save_lead happy path + missing fields, escalate_to_advisor with Resend down (non-blocking failure)
 
 ---
@@ -137,6 +137,7 @@ This is the single source of truth for what needs to be built. It is organized i
 
 ## Epic 10 — Admin Panel: Auth & Layout
 
+- [x] Backend admin auth foundation: `SupabaseAuthGuard` (`apps/api/src/auth/`) verifies the caller's Supabase Auth access token (`supabase.auth.getUser`) and resolves `agency_id` via `agency_users`, attaching `{ userId, agencyId }` to the request (`@CurrentAgency()` decorator). This is the auth boundary `PropertiesController`/`LeadsController` (Epic 7/8) will sit behind — see `ARCHITECTURE.md` → Auth Boundary. The frontend pieces below (login page, protected layout, session handling) are still pending.
 - [ ] Next.js App Router scaffolding confirmed (`(auth)` and `(dashboard)` route groups) — only the default scaffold (`app/layout.tsx` + `app/page.tsx`) exists; no route groups yet
 - [ ] Supabase Auth login page (`app/(auth)/login/page.tsx`, Spanish UI)
 - [ ] Protected `(dashboard)` layout — server-side session verification, redirect to login if unauthenticated

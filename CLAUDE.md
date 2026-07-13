@@ -125,8 +125,8 @@ Every table (except `agencies`) has an `agency_id` column. **Every query must fi
 
 ### Supabase client usage
 - **Backend (NestJS):** always use the `service_role` key. Never use the `anon` key in the backend.
-- **Frontend (Next.js):** use the `anon` key with Supabase Auth for RLS enforcement.
-- RLS policies are defined in Supabase for the admin panel. The backend bypasses RLS intentionally and enforces `agency_id` at the query level.
+- **Frontend (Next.js):** use the `anon` key with Supabase Auth for authentication (login/session) only. Admin data CRUD (properties, leads) goes through the NestJS API, authenticated via the user's Supabase Auth access token (`SupabaseAuthGuard`, see `ARCHITECTURE.md` → Auth Boundary) — not direct table access.
+- RLS policies are defined in Supabase for the admin panel as defense in depth. The backend (both the WhatsApp path and the admin path) bypasses RLS intentionally and enforces `agency_id` at the query level.
 - The `vector` extension (pgvector) is installed in the `extensions` schema, not `public`, per Supabase's security lint recommendations (`extension_in_public`).
 
 ### Shared types
