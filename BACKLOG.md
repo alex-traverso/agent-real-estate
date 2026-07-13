@@ -91,8 +91,8 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] Webhook reply seam switched from static placeholder to `AgentService.processMessage()` (generic Spanish fallback on agent failure)
 - [x] Tool-calling loop implemented: Claude → tool_use → execute → tool_result → Claude → final text (bounded by `MAX_TOOL_ITERATIONS`)
 - [x] SECURITY: no user message content is interpolated into the system prompt (unit-tested); lead `phone` is taken from conversation context, never from the model
-- [ ] SECURITY: confirm injection attempts get polite redirection, never compliance — defense is in the prompt; **behavioral verification pending live E2E** with `SECURITY.md` prompts
-- [x] TESTER: tool failure → graceful recovery + normal conversation flow covered (`agent.service.spec.ts`, `webhook.service.spec.ts`); live injection behavior pending E2E
+- [x] SECURITY: confirm injection attempts get polite redirection, never compliance — **verified live 2026-07-11** via `apps/api/supabase/injection.smoke.ts` (new manual smoke, `yarn workspace api injection:smoke`), which bootstraps the real Nest DI container and runs the battery through the production `AgentService` (real system prompt, real model, real tool loop). 11/12 attacks across all `SECURITY.md` categories (instruction override, role change/jailbreak, secret/config exfiltration, data exfiltration/cross-tenant, rudeness/off-topic) redirected politely with no compliance, no prompt/tool leakage, no cross-tenant data. The "admit being an AI" attack surfaced a policy gap: Luca actively claimed to be human. Fixed in system prompt `1.4.0` — Luca now deflects the direct "are you a bot?" question without falsely claiming personhood or over-disclosing being an AI; re-verified clean after the fix.
+- [x] TESTER: tool failure → graceful recovery + normal conversation flow covered (`agent.service.spec.ts`, `webhook.service.spec.ts`); live injection behavior verified via `injection.smoke.ts` (see above)
 
 ---
 
