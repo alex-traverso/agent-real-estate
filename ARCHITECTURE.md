@@ -258,6 +258,16 @@ src/
 │                                      WebhookService right after tenant
 │                                      resolution, before the rate limit
 │
+├── auth/
+│   ├── auth.module.ts
+│   ├── supabase-auth.guard.ts      # Admin panel auth: verifies the Supabase
+│   │                                  Auth bearer token, resolves agency_id via
+│   │                                  agency_users, attaches { userId, agencyId }
+│   │                                  to the request — see Auth Boundary above
+│   ├── current-agency.decorator.ts # @CurrentAgency() — reads the resolved
+│   │                                  agency_id set by SupabaseAuthGuard
+│   └── types/authenticated-request.type.ts
+│
 └── common/
     ├── supabase/
     │   └── supabase.service.ts     # Singleton Supabase client (service role)
@@ -444,7 +454,7 @@ Each layer is independent. A failure at one layer does not bypass the others.
 | Client | Auth Method | DB Access |
 |--------|------------|-----------|
 | WhatsApp clients | None (public webhook) | Via NestJS service role — agency_id enforced in code |
-| Admin panel users | Supabase Auth (email/password) | Via anon key — RLS enforced in DB |
+| Admin panel users | Supabase Auth (email/password), access token sent as `Authorization: Bearer` to the NestJS API | Via NestJS service role — `SupabaseAuthGuard` verifies the token (`supabase.auth.getUser`) and resolves `agency_id` from `agency_users`; every admin route is `agency_id`-scoped in code, same model as the WhatsApp path. RLS policies remain in place as defense in depth, not the primary access path. |
 | NestJS backend | Service role key | Bypasses RLS — agency_id enforced in every query |
 
 ---
