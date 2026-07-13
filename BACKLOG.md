@@ -119,8 +119,8 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] `LeadsService` / `NotificationsService` — `escalate_to_advisor` (composed in `EscalationService`, shared with the Epic 4 message-cap handoff) saves lead + emails advisor via Resend
 - [x] Tool definitions: `save-lead.tool.ts`, `escalate-to-advisor.tool.ts`
 - [x] `NotificationsService` — Resend integration, non-blocking (failure logged, doesn't block lead save)
-- [ ] `LeadsController` — CRUD/status-update endpoints for admin panel — **deferred to Epic 11**; admin auth foundation (`SupabaseAuthGuard`, `apps/api/src/auth/`) landed ahead of it, see Epic 10 note
-- [x] TESTER: save_lead happy path + missing fields, escalate_to_advisor with Resend down (non-blocking failure)
+- [x] `LeadsController` — admin read/status-update (`apps/api/src/leads/leads.controller.ts`), every route behind `SupabaseAuthGuard` + `@CurrentAgency()`: `GET /leads` (paginated, optional `status` filter), `GET /leads/:id`, `GET /leads/:id/conversation` (the WhatsApp history that produced the lead, via `conversations.lead_id` — null if the lead wasn't created from a conversation), `PATCH /leads/:id/status`. No admin create endpoint — leads are only ever created by the agent's `save_lead` tool. `LeadsService` gained the matching admin methods (`listForAdmin`, `getByIdForAdmin`, `getConversationForLead`, `updateStatus`). CRUD/list UI itself stays in Epic 11 (frontend).
+- [x] TESTER: save_lead happy path + missing fields, escalate_to_advisor with Resend down (non-blocking failure); admin methods unit-tested (`leads.service.spec.ts`, `leads.controller.spec.ts`) and verified live end-to-end against the local stack (auth guard 401/200, status filter, conversation lookup, status update, DTO validation 400, 404 on unknown id)
 
 ---
 
@@ -137,7 +137,7 @@ This is the single source of truth for what needs to be built. It is organized i
 
 ## Epic 10 — Admin Panel: Auth & Layout
 
-- [x] Backend admin auth foundation: `SupabaseAuthGuard` (`apps/api/src/auth/`) verifies the caller's Supabase Auth access token (`supabase.auth.getUser`) and resolves `agency_id` via `agency_users`, attaching `{ userId, agencyId }` to the request (`@CurrentAgency()` decorator). This is the auth boundary `PropertiesController` (Epic 7, done) and `LeadsController` (Epic 8, pending) sit behind — see `ARCHITECTURE.md` → Auth Boundary. Verified live end-to-end (401 without/with an invalid token, 200 with a real admin session) via `PropertiesController`. The frontend pieces below (login page, protected layout, session handling) are still pending.
+- [x] Backend admin auth foundation: `SupabaseAuthGuard` (`apps/api/src/auth/`) verifies the caller's Supabase Auth access token (`supabase.auth.getUser`) and resolves `agency_id` via `agency_users`, attaching `{ userId, agencyId }` to the request (`@CurrentAgency()` decorator). This is the auth boundary both admin controllers sit behind — see `ARCHITECTURE.md` → Auth Boundary. Verified live end-to-end (401 without/with an invalid token, 200 with a real admin session) via both `PropertiesController` (Epic 7) and `LeadsController` (Epic 8). The frontend pieces below (login page, protected layout, session handling) are still pending.
 - [ ] Next.js App Router scaffolding confirmed (`(auth)` and `(dashboard)` route groups) — only the default scaffold (`app/layout.tsx` + `app/page.tsx`) exists; no route groups yet
 - [ ] Supabase Auth login page (`app/(auth)/login/page.tsx`, Spanish UI)
 - [ ] Protected `(dashboard)` layout — server-side session verification, redirect to login if unauthenticated

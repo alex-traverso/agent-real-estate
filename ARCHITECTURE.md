@@ -164,8 +164,8 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 > `phone` is taken from the conversation, never from the model. The request to
 > Claude uses prompt caching (see "Prompt Caching Strategy" below) and
 > disables thinking explicitly, since Luca's replies are short and
-> conversational. The admin-facing `PropertiesController` (see Auth Boundary
-> above) is live; `LeadsController` is deferred to Epic 8/11.
+> conversational. Both admin-facing controllers (`PropertiesController`,
+> `LeadsController` — see Auth Boundary above) are live.
 ```
 
 ---
@@ -233,10 +233,14 @@ src/
 │
 ├── leads/
 │   ├── leads.module.ts
-│   ├── leads.controller.ts         # CRUD endpoints for admin panel
-│   ├── leads.service.ts            # Lead creation, status updates
+│   ├── leads.controller.ts         # Admin read/status-update (SupabaseAuthGuard-
+│   │                                  protected); no create route — leads only
+│   │                                  come from the agent's save_lead tool
+│   ├── leads.service.ts            # Agent-facing saveLead + admin methods
+│   │                                  (list/get/getConversationForLead/updateStatus)
 │   └── dto/
-│       └── create-lead.dto.ts
+│       ├── update-lead-status.dto.ts
+│       └── list-leads-query.dto.ts
 │
 ├── notifications/
 │   ├── notifications.module.ts
