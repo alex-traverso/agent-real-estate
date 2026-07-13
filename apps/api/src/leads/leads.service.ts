@@ -1,9 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
-import type { Tables, TablesInsert } from 'types';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import type { Enums, Tables, TablesInsert } from 'types';
 import { SupabaseService } from '../common/supabase/supabase.service';
 import type { SaveLeadInput } from './types/lead-input.type';
 
 type Lead = Tables<'leads'>;
+type Conversation = Tables<'conversations'>;
 
 /**
  * Persists qualified leads to the `leads` table. Agent-facing: the `save_lead`
@@ -89,5 +95,130 @@ export class LeadsService {
         `[LeadsService] Failed to link conversation to lead | conversationId: ${conversationId} | leadId: ${leadId} | error: ${error.message}`,
       );
     }
+  }
+
+  /**
+   * Admin panel listing: every lead for the agency, optionally narrowed by
+   * status, paginated and newest first.
+   */
+  async listForAdmin(
+    agencyId: string,
+    page: number,
+    limit: number,
+    status?: Enums<'lead_status'>,
+  ): Promise<{ data: Lead[]; total: number }> {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = this.supabase.client
+      .from('leads')
+      .select('*', { count: 'exact' })
+      .eq('agency_id', agencyId);
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data, error, count } = await query
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      this.logger.error(
+        `[LeadsService] Admin list failed | agencyId: ${agencyId} | error: ${error.message}`,
+      );
+      throw new InternalServerErrorException('Failed to list leads');
+    }
+
+    return { data: data ?? [], total: count ?? 0 };
+  }
+
+  /**
+   * Admin panel single-lead lookup. Throws NotFoundException if the id
+   * doesn't exist or belongs to another agency — the two cases are
+   * indistinguishable to the caller by design.
+   */
+  async getByIdForAdmin(agencyId: string, id: string): Promise<Lead> {
+    const { data, error } = await this.supabase.client
+      .from('leads')
+      .select('*')
+      .eq('agency_id', agencyId)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      this.logger.error(
+        `[LeadsService] Admin lookup failed | agencyId: ${agencyId} | error: ${error.message}`,
+      );
+      throw new InternalServerErrorException('Failed to fetch lead');
+    }
+
+    if (!data) {
+      throw new NotFoundException('Lead not found');
+    }
+
+    return data;
+  }
+
+  /**
+   * The conversation that produced this lead, if any (a lead can exist
+   * without one — e.g. created directly, outside the WhatsApp flow). Confirms
+   * the lead exists and belongs to the agency first, so a missing lead is
+   * reported as 404 rather than as an empty conversation.
+   */
+  async getConversationForLead(
+    agencyId: string,
+    leadId: string,
+  ): Promise<Conversation | null> {
+    await this.getByIdForAdmin(agencyId, leadId);
+
+    const { data, error } = await this.supabase.client
+      .from('conversations')
+      .select('*')
+      .eq('agency_id', agencyId)
+      .eq('lead_id', leadId)
+      .maybeSingle();
+
+    if (error) {
+      this.logger.error(
+        `[LeadsService] Failed to fetch conversation for lead | agencyId: ${agencyId} | leadId: ${leadId} | error: ${error.message}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to fetch lead conversation',
+      );
+    }
+
+    return data;
+  }
+
+  /**
+   * Updates a lead's status. Confirms the lead exists first, so a genuine
+   * DB failure on the update itself is never reported as a 404.
+   */
+  async updateStatus(
+    agencyId: string,
+    id: string,
+    status: Enums<'lead_status'>,
+  ): Promise<Lead> {
+    await this.getByIdForAdmin(agencyId, id);
+
+    const { data, error } = await this.supabase.client
+      .from('leads')
+      .update({ status })
+      .eq('agency_id', agencyId)
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      this.logger.error(
+        `[LeadsService] Failed to update lead status | agencyId: ${agencyId} | leadId: ${id} | error: ${
+          error?.message ?? 'no row returned'
+        }`,
+      );
+      throw new InternalServerErrorException('Failed to update lead status');
+    }
+
+    return data;
   }
 }
