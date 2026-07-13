@@ -164,8 +164,8 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 > `phone` is taken from the conversation, never from the model. The request to
 > Claude uses prompt caching (see "Prompt Caching Strategy" below) and
 > disables thinking explicitly, since Luca's replies are short and
-> conversational. The admin-facing `PropertiesController` / `LeadsController`
-> are deferred to the admin panel (Epic 11).
+> conversational. The admin-facing `PropertiesController` (see Auth Boundary
+> above) is live; `LeadsController` is deferred to Epic 8/11.
 ```
 
 ---
@@ -217,11 +217,15 @@ src/
 │
 ├── properties/
 │   ├── properties.module.ts
-│   ├── properties.controller.ts    # CRUD endpoints for admin panel
-│   ├── properties.service.ts       # Filter search + address search
+│   ├── properties.controller.ts    # Admin CRUD (SupabaseAuthGuard-protected)
+│   ├── properties.service.ts       # Agent-facing search (filters/semantic/
+│   │                                  address) + admin CRUD (list/get/create/
+│   │                                  update/setAvailability)
 │   └── dto/
 │       ├── create-property.dto.ts
-│       └── search-properties.dto.ts
+│       ├── update-property.dto.ts
+│       ├── set-availability.dto.ts
+│       └── list-properties-query.dto.ts
 │
 ├── embeddings/
 │   ├── embeddings.module.ts

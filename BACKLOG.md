@@ -108,8 +108,8 @@ This is the single source of truth for what needs to be built. It is organized i
   - [x] `search-property-by-address.tool.ts`
 - [x] Tool execution logic wired into `AgentService` (not in the tool definition files)
 - [x] Search strategy from `CLAUDE.md`/`ARCHITECTURE.md` enforced in system prompt (address → filters+semantic rank → semantic-only)
-- [ ] `PropertiesController` — CRUD endpoints for admin panel (create, update, toggle availability) — **deferred to Epic 11**; admin auth foundation (`SupabaseAuthGuard`, `apps/api/src/auth/`) landed ahead of it, see Epic 10 note
-- [x] TESTER: filter search (matches/empty), address search (match/no match) at the service level; tool dispatch covered in `agent.service.spec.ts`
+- [x] `PropertiesController` — admin CRUD (`apps/api/src/properties/properties.controller.ts`), every route behind `SupabaseAuthGuard` + `@CurrentAgency()`: `GET /properties` (paginated, includes unavailable listings — unlike the agent-facing search methods), `GET /properties/:id`, `POST /properties`, `PATCH /properties/:id`, `PATCH /properties/:id/availability`. `PropertiesService` gained admin methods (`listForAdmin`, `getByIdForAdmin`, `create`, `update`, `setAvailability`); `create`/`update` (re)generate the embedding via `buildPropertyEmbeddingInput` — `update` only pays the OpenAI call when a field that actually feeds the embedding text changed. Input validated by DTOs (`properties/dto/`, `class-validator`, enums sourced from the generated `Constants`) behind a new app-wide `ValidationPipe` (`main.ts`). CSV bulk upload stays deferred to Epic 11 (frontend concern).
+- [x] TESTER: filter search (matches/empty), address search (match/no match) at the service level; tool dispatch covered in `agent.service.spec.ts`; admin CRUD unit-tested (`properties.service.spec.ts`, `properties.controller.spec.ts`) and verified live end-to-end against the local stack (auth guard 401/200, full CRUD, DTO validation 400, 404 on unknown id)
 
 ---
 
@@ -137,7 +137,7 @@ This is the single source of truth for what needs to be built. It is organized i
 
 ## Epic 10 — Admin Panel: Auth & Layout
 
-- [x] Backend admin auth foundation: `SupabaseAuthGuard` (`apps/api/src/auth/`) verifies the caller's Supabase Auth access token (`supabase.auth.getUser`) and resolves `agency_id` via `agency_users`, attaching `{ userId, agencyId }` to the request (`@CurrentAgency()` decorator). This is the auth boundary `PropertiesController`/`LeadsController` (Epic 7/8) will sit behind — see `ARCHITECTURE.md` → Auth Boundary. The frontend pieces below (login page, protected layout, session handling) are still pending.
+- [x] Backend admin auth foundation: `SupabaseAuthGuard` (`apps/api/src/auth/`) verifies the caller's Supabase Auth access token (`supabase.auth.getUser`) and resolves `agency_id` via `agency_users`, attaching `{ userId, agencyId }` to the request (`@CurrentAgency()` decorator). This is the auth boundary `PropertiesController` (Epic 7, done) and `LeadsController` (Epic 8, pending) sit behind — see `ARCHITECTURE.md` → Auth Boundary. Verified live end-to-end (401 without/with an invalid token, 200 with a real admin session) via `PropertiesController`. The frontend pieces below (login page, protected layout, session handling) are still pending.
 - [ ] Next.js App Router scaffolding confirmed (`(auth)` and `(dashboard)` route groups) — only the default scaffold (`app/layout.tsx` + `app/page.tsx`) exists; no route groups yet
 - [ ] Supabase Auth login page (`app/(auth)/login/page.tsx`, Spanish UI)
 - [ ] Protected `(dashboard)` layout — server-side session verification, redirect to login if unauthenticated

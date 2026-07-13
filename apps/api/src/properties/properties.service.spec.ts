@@ -48,16 +48,70 @@ function propertyRow(overrides: Record<string, unknown> = {}) {
     id: 'prop-1',
     agency_id: 'agency-1',
     title: 'Depto luminoso',
+    description: 'Luminoso y amplio',
     type: 'apartment',
     operation: 'sale',
     price: 100000,
     currency: 'USD',
     zone: 'Palermo',
     address: 'Av. Santa Fe 4200',
+    rooms: 3,
+    bedrooms: 2,
+    parking: true,
     available: true,
     ...overrides,
   };
 }
+
+type AdminResult = {
+  data: unknown;
+  error: { message: string } | null;
+  count?: number | null;
+};
+
+/**
+ * Builder mock for the admin CRUD methods: same chainable style as
+ * makeService above, but the terminal call is single()/maybeSingle() instead
+ * of the builder itself being thenable — every terminal call pops the next
+ * queued result.
+ */
+function makeAdminService(
+  results: AdminResult[],
+  vector: number[] = [0.1, 0.2, 0.3],
+) {
+  const builder: Record<string, jest.Mock> = {};
+  for (const method of ['select', 'eq', 'order', 'insert', 'update']) {
+    builder[method] = jest.fn(() => builder);
+  }
+  const pop = () => results.shift() ?? { data: null, error: null };
+  // range() is the terminal call for listForAdmin (awaited directly, no
+  // single()/maybeSingle() after it), unlike the other admin methods.
+  builder.range = jest.fn(() => Promise.resolve(pop()));
+  builder.maybeSingle = jest.fn(() => Promise.resolve(pop()));
+  builder.single = jest.fn(() => Promise.resolve(pop()));
+
+  const from = jest.fn(() => builder);
+  const supabase = { client: { from } } as unknown as SupabaseService;
+
+  const generateEmbedding = jest.fn().mockResolvedValue(vector);
+  const embeddings = { generateEmbedding } as unknown as EmbeddingsService;
+
+  const service = new PropertiesService(supabase, embeddings);
+  return { service, builder, from, generateEmbedding };
+}
+
+const createDto = {
+  title: 'Depto luminoso',
+  description: 'Luminoso y amplio',
+  zone: 'Palermo',
+  type: 'apartment' as const,
+  operation: 'sale' as const,
+  price: 100000,
+  currency: 'USD' as const,
+  rooms: 3,
+  bedrooms: 2,
+  parking: true,
+};
 
 describe('PropertiesService', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -316,6 +370,240 @@ describe('PropertiesService', () => {
       await expect(service.listAvailableZones('agency-1')).rejects.toThrow(
         'Failed to list zones',
       );
+    });
+  });
+
+  describe('listForAdmin', () => {
+    it('scopes by agency_id, orders newest first, and paginates via range', async () => {
+      const rows = [propertyRow(), propertyRow({ available: false })];
+      const { service, builder, from } = makeAdminService([
+        { data: rows, error: null, count: 2 },
+      ]);
+
+      const result = await service.listForAdmin('agency-1', 2, 10);
+
+      expect(result).toEqual({ data: rows, total: 2 });
+      expect(from).toHaveBeenCalledWith('properties');
+      expect(builder.select).toHaveBeenCalledWith('*', { count: 'exact' });
+      expect(builder.eq).toHaveBeenCalledWith('agency_id', 'agency-1');
+      expect(builder.order).toHaveBeenCalledWith('created_at', {
+        ascending: false,
+      });
+      expect(builder.range).toHaveBeenCalledWith(10, 19);
+    });
+
+    it('includes unavailable properties (no available filter)', async () => {
+      const { service, builder } = makeAdminService([
+        { data: [], error: null, count: 0 },
+      ]);
+
+      await service.listForAdmin('agency-1', 1, 20);
+
+      expect(builder.eq).not.toHaveBeenCalledWith(
+        'available',
+        expect.anything(),
+      );
+    });
+
+    it('throws a generic error when the query fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { service } = makeAdminService([
+        { data: null, error: { message: 'db down' } },
+      ]);
+
+      await expect(service.listForAdmin('agency-1', 1, 20)).rejects.toThrow(
+        'Failed to list properties',
+      );
+    });
+  });
+
+  describe('getByIdForAdmin', () => {
+    it('returns the property scoped by agency_id + id', async () => {
+      const row = propertyRow();
+      const { service, builder } = makeAdminService([
+        { data: row, error: null },
+      ]);
+
+      const result = await service.getByIdForAdmin('agency-1', 'prop-1');
+
+      expect(result).toEqual(row);
+      expect(builder.eq).toHaveBeenCalledWith('agency_id', 'agency-1');
+      expect(builder.eq).toHaveBeenCalledWith('id', 'prop-1');
+    });
+
+    it('throws NotFoundException when the id does not exist or belongs to another agency', async () => {
+      const { service } = makeAdminService([{ data: null, error: null }]);
+
+      await expect(
+        service.getByIdForAdmin('agency-1', 'missing'),
+      ).rejects.toThrow('Property not found');
+    });
+
+    it('throws a generic error when the query fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { service } = makeAdminService([
+        { data: null, error: { message: 'db down' } },
+      ]);
+
+      await expect(
+        service.getByIdForAdmin('agency-1', 'prop-1'),
+      ).rejects.toThrow('Failed to fetch property');
+    });
+  });
+
+  describe('create', () => {
+    it('generates the embedding and inserts a row scoped to the agency', async () => {
+      const row = propertyRow();
+      const { service, builder, generateEmbedding } = makeAdminService([
+        { data: row, error: null },
+      ]);
+
+      const result = await service.create('agency-1', createDto);
+
+      expect(result).toEqual(row);
+      expect(generateEmbedding).toHaveBeenCalledWith(
+        expect.stringContaining('Depto luminoso'),
+      );
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agency_id: 'agency-1',
+          title: 'Depto luminoso',
+          zone: 'Palermo',
+          type: 'apartment',
+          operation: 'sale',
+          price: 100000,
+          currency: 'USD',
+          embedding: '[0.1,0.2,0.3]',
+        }),
+      );
+    });
+
+    it('throws a generic error when the insert fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { service } = makeAdminService([
+        { data: null, error: { message: 'db down' } },
+      ]);
+
+      await expect(service.create('agency-1', createDto)).rejects.toThrow(
+        'Failed to create property',
+      );
+    });
+  });
+
+  describe('update', () => {
+    it('does not re-embed when only a non-embedding field changes', async () => {
+      const current = propertyRow();
+      const updated = { ...current, price: 150000 };
+      const { service, builder, generateEmbedding } = makeAdminService([
+        { data: current, error: null }, // getByIdForAdmin
+        { data: updated, error: null }, // update().select().single()
+      ]);
+
+      const result = await service.update('agency-1', 'prop-1', {
+        price: 150000,
+      });
+
+      expect(result).toEqual(updated);
+      expect(generateEmbedding).not.toHaveBeenCalled();
+      expect(builder.update).toHaveBeenCalledWith({ price: 150000 });
+    });
+
+    it('re-embeds when an embedding-relevant field changes, merged onto the current row', async () => {
+      const current = propertyRow();
+      const updated = { ...current, title: 'Depto reformado' };
+      const { service, builder, generateEmbedding } = makeAdminService([
+        { data: current, error: null },
+        { data: updated, error: null },
+      ]);
+
+      await service.update('agency-1', 'prop-1', { title: 'Depto reformado' });
+
+      expect(generateEmbedding).toHaveBeenCalledWith(
+        expect.stringContaining('Depto reformado'),
+      );
+      expect(builder.update).toHaveBeenCalledWith({
+        title: 'Depto reformado',
+        embedding: '[0.1,0.2,0.3]',
+      });
+    });
+
+    it('maps coveredArea/totalArea/hoaFees to their snake_case columns', async () => {
+      const current = propertyRow();
+      const { service, builder } = makeAdminService([
+        { data: current, error: null },
+        { data: current, error: null },
+      ]);
+
+      await service.update('agency-1', 'prop-1', {
+        coveredArea: 80,
+        totalArea: 100,
+        hoaFees: 500,
+      });
+
+      expect(builder.update).toHaveBeenCalledWith({
+        covered_area: 80,
+        total_area: 100,
+        hoa_fees: 500,
+      });
+    });
+
+    it('propagates NotFoundException when the property does not exist', async () => {
+      const { service } = makeAdminService([{ data: null, error: null }]);
+
+      await expect(
+        service.update('agency-1', 'missing', { price: 1 }),
+      ).rejects.toThrow('Property not found');
+    });
+
+    it('throws a generic error when the update fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const current = propertyRow();
+      const { service } = makeAdminService([
+        { data: current, error: null },
+        { data: null, error: { message: 'db down' } },
+      ]);
+
+      await expect(
+        service.update('agency-1', 'prop-1', { price: 1 }),
+      ).rejects.toThrow('Failed to update property');
+    });
+  });
+
+  describe('setAvailability', () => {
+    it('toggles availability without regenerating the embedding', async () => {
+      const current = propertyRow();
+      const updated = { ...current, available: false };
+      const { service, builder, generateEmbedding } = makeAdminService([
+        { data: current, error: null }, // getByIdForAdmin existence check
+        { data: updated, error: null }, // update
+      ]);
+
+      const result = await service.setAvailability('agency-1', 'prop-1', false);
+
+      expect(result).toEqual(updated);
+      expect(generateEmbedding).not.toHaveBeenCalled();
+      expect(builder.update).toHaveBeenCalledWith({ available: false });
+    });
+
+    it('propagates NotFoundException when the property does not exist', async () => {
+      const { service } = makeAdminService([{ data: null, error: null }]);
+
+      await expect(
+        service.setAvailability('agency-1', 'missing', true),
+      ).rejects.toThrow('Property not found');
+    });
+
+    it('throws a generic error when the update itself fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const current = propertyRow();
+      const { service } = makeAdminService([
+        { data: current, error: null },
+        { data: null, error: { message: 'db down' } },
+      ]);
+
+      await expect(
+        service.setAvailability('agency-1', 'prop-1', true),
+      ).rejects.toThrow('Failed to set availability');
     });
   });
 });
