@@ -155,6 +155,11 @@ git clone https://github.com/alextraverso/agent-real-estate.git
 cd agent-real-estate
 yarn install
 
+# packages/types is a real compiled package (apps/api requires it at runtime,
+# not just for typechecking) — build it before starting the backend, and
+# again any time database.types.ts is regenerated.
+yarn workspace types build
+
 # Create the env files (there are two — one per app)
 cp .env.example apps/api/.env         # backend (NestJS)
 cp .env.example apps/admin/.env.local # admin panel (Next.js)

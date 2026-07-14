@@ -132,6 +132,8 @@ Every table (except `agencies`) has an `agency_id` column. **Every query must fi
 ### Shared types
 Generated Supabase types live in `packages/types/src/database.types.ts` (via `mcp__supabase__generate_typescript_types` / `supabase gen types`). Regenerate after every schema-changing migration and import from `packages/types`, never redefine DB row shapes by hand.
 
+`packages/types` is a real compiled package (`yarn workspace types build` → `dist/`, CommonJS — required so `apps/api` can `require()` it directly at runtime; it's not type-only, it also exports the runtime `Constants` object used for enum validation). **Run `yarn workspace types build` after regenerating `database.types.ts`**, or `apps/api` will keep running against the stale compiled output.
+
 ### Migrations
 Migrations are managed via Supabase CLI. Migration files live in `apps/api/supabase/migrations/`. Never modify the database schema directly from the Supabase dashboard without creating a corresponding migration file.
 
