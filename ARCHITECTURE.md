@@ -288,24 +288,48 @@ src/
 
 ## Module Structure — `apps/admin`
 
+No `src/` directory — the App Router lives directly under `apps/admin/app/`.
+
 ```
-src/
-└── app/
-    ├── layout.tsx                  # Root layout
-    ├── (auth)/
-    │   └── login/
-    │       └── page.tsx            # Login page (Spanish UI)
-    └── (dashboard)/
-        ├── layout.tsx              # Protected layout — verifies Supabase Auth session
-        ├── page.tsx                # Dashboard home
-        ├── properties/
-        │   ├── page.tsx            # Property list + CSV upload
-        │   └── [id]/
-        │       └── page.tsx        # Property detail + availability toggle
-        └── leads/
-            ├── page.tsx            # Lead list with status filter
-            └── [id]/
-                └── page.tsx        # Lead detail + conversation history
+proxy.ts                          # Root proxy (formerly "middleware"): refreshes
+                                     the Supabase session cookie on every request
+                                     via lib/supabase/middleware.ts. Does not
+                                     redirect — that's the (dashboard) layout's job.
+components.json                   # shadcn/ui config (style: radix-nova, neutral base)
+lib/
+├── utils.ts                       # shadcn's `cn()` helper
+└── supabase/
+    ├── client.ts                  # Browser client (Client Components: login, forms)
+    ├── server.ts                  # Server client (Server Components, reads/writes
+    │                                 cookies via next/headers)
+    └── middleware.ts               # updateSession() — called from proxy.ts
+components/
+└── ui/                            # shadcn/ui primitives (button, input, label, card, …)
+app/
+├── layout.tsx                     # Root layout — fonts, globals.css, {children}
+├── globals.css                    # Tailwind v4 + shadcn theme tokens
+├── (auth)/
+│   ├── layout.tsx                 # Centered shell, no dashboard nav
+│   ├── login/
+│   │   └── page.tsx               # Login (Spanish UI), no self-signup
+│   ├── forgot-password/
+│   │   └── page.tsx               # Requests a password-reset email
+│   └── reset-password/
+│       └── page.tsx               # Sets a new password (landed on via the reset email)
+└── (dashboard)/
+    ├── layout.tsx                 # Protected layout — Server Component,
+    │                                 supabase.auth.getUser() + redirect('/login')
+    │                                 if unauthenticated; header + logout button
+    ├── actions.ts                 # 'use server' — logout() (signOut + redirect)
+    ├── page.tsx                   # Dashboard home (static welcome, Epic 10)
+    ├── properties/                # Epic 11 — not built yet
+    │   ├── page.tsx                # Property list + CSV upload
+    │   └── [id]/
+    │       └── page.tsx            # Property detail + availability toggle
+    └── leads/                     # Epic 11 — not built yet
+        ├── page.tsx                # Lead list with status filter
+        └── [id]/
+            └── page.tsx            # Lead detail + conversation history
 ```
 
 ---
@@ -534,4 +558,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=  # Supabase anon key (public, RLS enforced)
 | Conversation history | Full history per request, prompt-cached | Better agent context; caching keeps resending full history cheap; 50-message limit is the remaining hard cost bound |
 | Session timeout | 8 hours | Balances context retention with DB storage |
 | Admin auth | Supabase Auth | Already in stack, email/password out of the box |
+| Admin frontend session handling | `@supabase/ssr` (`createBrowserClient`/`createServerClient`), `supabase.auth.getUser()` in Server Components | Official current package for Next.js App Router (supersedes deprecated `@supabase/auth-helpers-nextjs`); `getUser()` revalidates against Supabase Auth instead of trusting an unverified session cookie like `getSession()` would |
+| Admin UI components | shadcn/ui (Radix primitives, Tailwind v4) | Already the project's chosen component approach; components are copied into the repo (`components/ui/`), not an opaque dependency |
 | Notifications | Resend email | Simpler than WhatsApp-to-advisor; free tier sufficient |

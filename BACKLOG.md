@@ -138,11 +138,11 @@ This is the single source of truth for what needs to be built. It is organized i
 ## Epic 10 — Admin Panel: Auth & Layout
 
 - [x] Backend admin auth foundation: `SupabaseAuthGuard` (`apps/api/src/auth/`) verifies the caller's Supabase Auth access token (`supabase.auth.getUser`) and resolves `agency_id` via `agency_users`, attaching `{ userId, agencyId }` to the request (`@CurrentAgency()` decorator). This is the auth boundary both admin controllers sit behind — see `ARCHITECTURE.md` → Auth Boundary. Verified live end-to-end (401 without/with an invalid token, 200 with a real admin session) via both `PropertiesController` (Epic 7) and `LeadsController` (Epic 8). The frontend pieces below (login page, protected layout, session handling) are still pending.
-- [ ] Next.js App Router scaffolding confirmed (`(auth)` and `(dashboard)` route groups) — only the default scaffold (`app/layout.tsx` + `app/page.tsx`) exists; no route groups yet
-- [ ] Supabase Auth login page (`app/(auth)/login/page.tsx`, Spanish UI)
-- [ ] Protected `(dashboard)` layout — server-side session verification, redirect to login if unauthenticated
-- [ ] shadcn/ui + Tailwind base setup confirmed working
-- [ ] Dashboard home page (`page.tsx`) — basic overview
+- [x] Next.js App Router scaffolding: `(auth)` and `(dashboard)` route groups built out (`apps/admin/app/`), default `create-next-app` boilerplate (`app/page.tsx` welcome content) removed
+- [x] Supabase Auth login (`app/(auth)/login/page.tsx`, Spanish UI, email/password only — no self-signup) via `@supabase/ssr`'s browser client (`lib/supabase/client.ts`); wrong credentials show an inline Spanish error. Password recovery included: `app/(auth)/forgot-password/page.tsx` (requests the reset email, same confirmation message whether or not the account exists) and `app/(auth)/reset-password/page.tsx` (sets the new password from the emailed link)
+- [x] Protected `(dashboard)` layout (`app/(dashboard)/layout.tsx`) — Server Component, `supabase.auth.getUser()` (revalidated, not a trusted cookie read) via `lib/supabase/server.ts`; redirects to `/login` if unauthenticated. Session cookies are kept fresh by `proxy.ts` (Next.js 16's replacement for `middleware.ts`) calling `lib/supabase/middleware.ts`. Logout is a server action (`app/(dashboard)/actions.ts`)
+- [x] shadcn/ui + Tailwind v4 base setup confirmed working (`components.json`, `radix-nova` style, neutral base color); `button`/`input`/`label`/`card` primitives added, more added on demand in Epic 11
+- [x] Dashboard home page (`app/(dashboard)/page.tsx`) — static welcome (logged-in user's email), no live data yet. Deliberately static: no fetch to the NestJS API and no CORS enabled on `apps/api` in this branch — both arrive with Epic 11's first real data page. No nav to Properties/Leads either, since those pages don't exist until Epic 11 (avoids linking to a 404). `apps/admin` dev server moved to port 3001 (`next dev -p 3001`) so it doesn't collide with `apps/api`'s default 3000 when both run locally
 
 ---
 

@@ -90,9 +90,8 @@ agent-real-estate/
 │   │           ├── interceptors/
 │   │           └── middleware/
 │   └── admin/
-│       └── src/
-│           └── app/
-│               ├── (auth)/           # Login — public
+│       └── app/                      # No src/ dir — App Router lives here directly
+│               ├── (auth)/           # Login, forgot/reset password — public
 │               └── (dashboard)/      # Protected routes
 │                   ├── properties/
 │                   └── leads/
