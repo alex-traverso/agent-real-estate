@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { OPERATION_TYPE_LABELS, PROPERTY_TYPE_LABELS } from "@/lib/property-labels";
 
 const { property_type, operation_type, currency_type } = Constants.public.Enums;
 
@@ -95,7 +96,7 @@ export function PropertyForm({
             <SelectContent>
               {property_type.map((value) => (
                 <SelectItem key={value} value={value}>
-                  {value}
+                  {PROPERTY_TYPE_LABELS[value]}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -112,7 +113,7 @@ export function PropertyForm({
             <SelectContent>
               {operation_type.map((value) => (
                 <SelectItem key={value} value={value}>
-                  {value}
+                  {OPERATION_TYPE_LABELS[value]}
                 </SelectItem>
               ))}
             </SelectContent>

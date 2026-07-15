@@ -2,32 +2,33 @@ import { Workbook } from "exceljs";
 import { NextResponse } from "next/server";
 import { Constants } from "types";
 import { createClient } from "@/lib/supabase/server";
+import { OPERATION_TYPE_LABELS, PROPERTY_TYPE_LABELS } from "@/lib/property-labels";
 
 const { property_type, operation_type, currency_type } = Constants.public.Enums;
 
 const HEADERS = [
-  "title",
-  "zone",
-  "type",
-  "operation",
-  "price",
-  "currency",
-  "description",
-  "rooms",
-  "bedrooms",
-  "bathrooms",
-  "coveredArea",
-  "totalArea",
-  "hoaFees",
-  "address",
-  "parking",
+  "Título",
+  "Zona",
+  "Tipo",
+  "Operación",
+  "Precio",
+  "Moneda",
+  "Descripción",
+  "Ambientes",
+  "Dormitorios",
+  "Baños",
+  "Superficie cubierta",
+  "Superficie total",
+  "Expensas",
+  "Dirección",
+  "Cochera",
 ] as const;
 
 const EXAMPLE_ROW = [
   "Casa 3 ambientes con jardín",
   "Palermo",
-  property_type[0],
-  operation_type[0],
+  PROPERTY_TYPE_LABELS[property_type[0]],
+  OPERATION_TYPE_LABELS[operation_type[0]],
   150000,
   currency_type[0],
   "Luminosa, a metros del subte",
@@ -38,7 +39,7 @@ const EXAMPLE_ROW = [
   100,
   25000,
   "Av. Santa Fe 1234",
-  true,
+  "Sí",
 ];
 
 export async function GET() {

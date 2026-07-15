@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ExcelUploadForm } from "./excel-upload-form";
+import { OPERATION_TYPE_LABELS, PROPERTY_TYPE_LABELS } from "@/lib/property-labels";
 
 const PAGE_SIZE = 20;
 
@@ -72,8 +73,8 @@ export default async function PropertiesPage({
                   </Link>
                 </TableCell>
                 <TableCell>{property.zone}</TableCell>
-                <TableCell>{property.type}</TableCell>
-                <TableCell>{property.operation}</TableCell>
+                <TableCell>{PROPERTY_TYPE_LABELS[property.type]}</TableCell>
+                <TableCell>{OPERATION_TYPE_LABELS[property.operation]}</TableCell>
                 <TableCell>
                   {property.currency} {property.price}
                 </TableCell>

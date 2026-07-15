@@ -48,9 +48,9 @@ export function ExcelUploadForm() {
       <div className="flex flex-col gap-1">
         <Label htmlFor="file">Carga masiva por Excel</Label>
         <p className="text-xs text-muted-foreground">
-          Columnas: title, zone, type, operation, price, currency, description,
-          rooms, bedrooms, bathrooms, coveredArea, totalArea, hoaFees, address,
-          parking.{" "}
+          Columnas: Título, Zona, Tipo, Operación, Precio, Moneda, Descripción,
+          Ambientes, Dormitorios, Baños, Superficie cubierta, Superficie total,
+          Expensas, Dirección, Cochera.{" "}
           <a href="/properties/template" download className="underline">
             Descargar plantilla
           </a>

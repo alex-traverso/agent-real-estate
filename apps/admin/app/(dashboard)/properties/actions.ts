@@ -5,6 +5,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Constants, type Tables } from "types";
 import { apiMutate } from "@/lib/api/client";
+import {
+  OPERATION_TYPE_LABELS,
+  PROPERTY_TYPE_LABELS,
+  normalizeText,
+  operationTypeFromLabel,
+  propertyTypeFromLabel,
+} from "@/lib/property-labels";
 import type { PropertyFormState } from "./property-form";
 
 type Property = Tables<"properties">;
@@ -86,7 +93,7 @@ export async function setPropertyAvailability(id: string, available: boolean) {
   revalidatePath(`/properties/${id}`);
 }
 
-const { property_type, operation_type, currency_type } = Constants.public.Enums;
+const { currency_type } = Constants.public.Enums;
 
 export type PropertyRowPayload = {
   rowNumber: number;
@@ -126,22 +133,40 @@ export type ConfirmUploadResult = {
 
 type PropertyField = Exclude<keyof PropertyRowPayload, "rowNumber">;
 
-// Header text (lowercased) -> canonical PropertyRowPayload field.
+// Header text (normalized: trimmed, lowercased, accents stripped) ->
+// canonical PropertyRowPayload field. Spanish is what the template/UI
+// actually produces; English aliases stay for backward compatibility with
+// files built against the old template.
 const COLUMN_ALIASES: Record<string, PropertyField> = {
+  titulo: "title",
   title: "title",
+  descripcion: "description",
   description: "description",
+  zona: "zone",
   zone: "zone",
+  tipo: "type",
   type: "type",
+  operacion: "operation",
   operation: "operation",
+  precio: "price",
   price: "price",
+  moneda: "currency",
   currency: "currency",
+  ambientes: "rooms",
   rooms: "rooms",
+  dormitorios: "bedrooms",
   bedrooms: "bedrooms",
+  banos: "bathrooms",
   bathrooms: "bathrooms",
+  "superficie cubierta": "coveredArea",
   coveredarea: "coveredArea",
+  "superficie total": "totalArea",
   totalarea: "totalArea",
+  expensas: "hoaFees",
   hoafees: "hoaFees",
+  direccion: "address",
   address: "address",
+  cochera: "parking",
   parking: "parking",
 };
 
@@ -225,7 +250,7 @@ export async function parsePropertiesExcel(
 
   const columnMap = new Map<number, PropertyField>();
   worksheet.getRow(1).eachCell((cell, colNumber) => {
-    const field = COLUMN_ALIASES[cellToString(cell.value).toLowerCase()];
+    const field = COLUMN_ALIASES[normalizeText(cellToString(cell.value))];
     if (field) columnMap.set(colNumber, field);
   });
 
@@ -250,24 +275,26 @@ export async function parsePropertiesExcel(
     const errors: string[] = [];
 
     const title = cellToString(cells.title);
-    if (!title) errors.push("title es obligatorio");
+    if (!title) errors.push("título es obligatorio");
 
     const zone = cellToString(cells.zone);
-    if (!zone) errors.push("zone es obligatorio");
+    if (!zone) errors.push("zona es obligatoria");
 
-    const type = cellToString(cells.type);
-    if (!property_type.includes(type as (typeof property_type)[number])) {
-      errors.push(`type debe ser uno de: ${property_type.join(", ")}`);
+    const typeInput = cellToString(cells.type);
+    const type = propertyTypeFromLabel(typeInput);
+    if (!type) {
+      errors.push(`tipo debe ser uno de: ${Object.values(PROPERTY_TYPE_LABELS).join(", ")}`);
     }
 
-    const operation = cellToString(cells.operation);
-    if (!operation_type.includes(operation as (typeof operation_type)[number])) {
-      errors.push(`operation debe ser uno de: ${operation_type.join(", ")}`);
+    const operationInput = cellToString(cells.operation);
+    const operation = operationTypeFromLabel(operationInput);
+    if (!operation) {
+      errors.push(`operación debe ser uno de: ${Object.values(OPERATION_TYPE_LABELS).join(", ")}`);
     }
 
     const currency = cellToString(cells.currency);
     if (currency && !currency_type.includes(currency as (typeof currency_type)[number])) {
-      errors.push(`currency debe ser uno de: ${currency_type.join(", ")}`);
+      errors.push(`moneda debe ser uno de: ${currency_type.join(", ")}`);
     }
 
     const numbers: Partial<Record<PropertyField, number>> = {};
@@ -297,8 +324,8 @@ export async function parsePropertiesExcel(
         title,
         description: cellToString(cells.description) || undefined,
         zone,
-        type,
-        operation,
+        type: type!,
+        operation: operation!,
         price: numbers.price!,
         currency: currency || undefined,
         rooms: numbers.rooms,
