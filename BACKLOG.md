@@ -148,12 +148,40 @@ This is the single source of truth for what needs to be built. It is organized i
 
 ## Epic 11 — Admin Panel: Properties & Leads Management
 
-- [ ] `properties/page.tsx` — property list, CSV upload
-- [ ] `properties/[id]/page.tsx` — property detail, availability toggle
+- [x] `apps/admin/lib/api/client.ts` — server-only fetch wrapper shared by every admin
+  page/action: attaches the current Supabase session's access token as `Authorization:
+  Bearer` when calling `apps/api`. `apiGet()` (Server Components — 404 → `notFound()`,
+  other failures throw, caught by `(dashboard)/error.tsx`) and `apiMutate()` (Server
+  Actions — returns `{ok, error}` instead of throwing, so forms show inline errors).
+  No CORS needed on `apps/api`: every call happens server-side (Next.js's own Node
+  process), never the browser.
+- [x] `properties/page.tsx` — property list (`GET /properties`, paginated), Excel bulk
+  upload (`exceljs`; replaced an initial CSV-based version after real-world use hit two
+  rounds of parsing bugs — a delimiter mismatch from es-AR locale exports, then
+  case-sensitive headers — that native Excel + a two-step flow avoid entirely).
+  `parsePropertiesExcel` reads the `.xlsx` and validates every row against
+  `CreatePropertyDto`'s exact rules (case-insensitive/trimmed headers, native numeric
+  cell types to sidestep locale/decimal-separator ambiguity, enum checks for
+  type/operation/currency) with **zero DB writes** — returns a preview showing what's
+  valid and what's wrong per row. Only after the user clicks "Confirmar carga" does
+  `confirmPropertiesUpload` loop `POST /properties` for the valid rows (no bulk backend
+  endpoint) and return a created/failed summary. `properties/template/route.ts` serves a
+  downloadable `.xlsx` template with the correct headers + an example row.
+- [x] `properties/[id]/page.tsx` — property detail: pre-filled, fully editable form
+  (`PATCH /properties/:id`) + an availability toggle that fires immediately
+  (`PATCH /properties/:id/availability`), independent of the form's own save. Went
+  beyond the original checklist item ("detail, availability toggle") to also cover
+  full manual create (`properties/new/page.tsx`) and edit — confirmed with the user,
+  since `apps/api` already supported both from Epic 7.
 - [ ] `leads/page.tsx` — lead list with status filter
 - [ ] `leads/[id]/page.tsx` — lead detail + full conversation history view
-- [ ] All data fetching in Server Components/Server Actions (no client-side fetching unless justified)
-- [ ] RLS confirmed working end-to-end (an advisor from Agency A cannot see Agency B's data)
+- [x] All data fetching in Server Components/Server Actions (no client-side fetching) —
+  true for the properties pages built so far; applies again once the leads pages land
+- [x] RLS / tenant isolation confirmed working end-to-end for properties — verified live
+  with a second agency + admin user: logging in as that user shows zero properties from
+  "Inmobiliaria Demo". This validates `SupabaseAuthGuard`'s `agency_id` resolution (the
+  primary enforcement path per `ARCHITECTURE.md` → Auth Boundary), not raw Postgres RLS
+  directly. Re-verify once leads pages exist.
 
 ---
 

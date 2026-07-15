@@ -304,7 +304,15 @@ lib/
     │                                 cookies via next/headers)
     └── middleware.ts               # updateSession() — called from proxy.ts
 components/
-└── ui/                            # shadcn/ui primitives (button, input, label, card, …)
+└── ui/                            # shadcn/ui primitives (button, input, label, card,
+                                     table, badge, select, textarea, switch, …)
+lib/api/
+└── client.ts                      # Server-only fetch wrapper for apps/api: attaches the
+                                     current Supabase session's access token as Bearer.
+                                     apiGet() (Server Components, throws/notFound() on
+                                     failure) and apiMutate() (Server Actions, returns
+                                     {ok,error} instead of throwing). Never called from
+                                     the browser — no CORS involved on apps/api.
 app/
 ├── layout.tsx                     # Root layout — fonts, globals.css, {children}
 ├── globals.css                    # Tailwind v4 + shadcn theme tokens
@@ -321,11 +329,33 @@ app/
     │                                 supabase.auth.getUser() + redirect('/login')
     │                                 if unauthenticated; header + logout button
     ├── actions.ts                 # 'use server' — logout() (signOut + redirect)
+    ├── error.tsx                  # Client Component boundary — generic Spanish
+    │                                 error + retry, catches apiGet()/action throws
     ├── page.tsx                   # Dashboard home (static welcome, Epic 10)
-    ├── properties/                # Epic 11 — not built yet
-    │   ├── page.tsx                # Property list + CSV upload
+    ├── properties/
+    │   ├── page.tsx                # List (GET /properties, paginated) + Excel upload
+    │   ├── actions.ts              # Server Actions: createProperty, updateProperty,
+    │   │                             setPropertyAvailability, parsePropertiesExcel,
+    │   │                             confirmPropertiesUpload
+    │   ├── property-form.tsx       # Shared create/edit form (Client Component)
+    │   ├── excel-upload-form.tsx   # Excel bulk upload (Client Component, two-step):
+    │   │                             parsePropertiesExcel validates the uploaded
+    │   │                             .xlsx (no DB writes, case-insensitive headers,
+    │   │                             native Excel numeric types) and renders a
+    │   │                             preview table; confirmPropertiesUpload then
+    │   │                             POSTs only the valid rows once the user clicks
+    │   │                             "Confirmar carga" — no bulk endpoint, loops
+    │   │                             POST /properties per row
+    │   ├── template/
+    │   │   └── route.ts            # GET — streams a downloadable .xlsx template
+    │   │                             with the correct headers + an example row
+    │   │                             (auth-checked directly, Route Handlers aren't
+    │   │                             wrapped by the dashboard layout's auth check)
+    │   ├── availability-toggle.tsx # Switch bound directly to setPropertyAvailability
+    │   ├── new/
+    │   │   └── page.tsx            # Manual create form
     │   └── [id]/
-    │       └── page.tsx            # Property detail + availability toggle
+    │       └── page.tsx            # Detail: pre-filled edit form + availability toggle
     └── leads/                     # Epic 11 — not built yet
         ├── page.tsx                # Lead list with status filter
         └── [id]/
@@ -542,6 +572,10 @@ RESEND_API_KEY=             # Email notifications
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=       # Supabase project URL (public)
 NEXT_PUBLIC_SUPABASE_ANON_KEY=  # Supabase anon key (public, RLS enforced)
+API_URL=                        # apps/api base URL. Server-only (no NEXT_PUBLIC_
+                                 # prefix) — every call happens in Server Components/
+                                 # Server Actions, never the browser, so apps/api
+                                 # needs no CORS config for this.
 ```
 
 ---
