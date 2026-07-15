@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DashboardHomePage() {
@@ -14,6 +15,9 @@ export default async function DashboardHomePage() {
       <p className="text-muted-foreground">
         Este es el panel de administración de Agent Real Estate.
       </p>
+      <Link href="/properties" className="text-sm underline">
+        Ver propiedades
+      </Link>
     </div>
   );
 }

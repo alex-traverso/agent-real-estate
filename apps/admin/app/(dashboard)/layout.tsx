@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
@@ -20,9 +21,17 @@ export default async function DashboardLayout({
   return (
     <div className="flex flex-1 flex-col">
       <header className="flex items-center justify-between border-b px-6 py-4">
-        <span className="font-heading text-base font-medium">
-          Agent Real Estate
-        </span>
+        <nav className="flex items-center gap-6">
+          <span className="font-heading text-base font-medium">
+            Agent Real Estate
+          </span>
+          <Link
+            href="/properties"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Propiedades
+          </Link>
+        </nav>
         <div className="flex items-center gap-4">
           <span className="text-sm text-muted-foreground">{user.email}</span>
           <form action={logout}>
