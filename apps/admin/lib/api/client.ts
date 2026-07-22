@@ -56,7 +56,11 @@ export async function apiGet<T>(path: string): Promise<T> {
     throw new Error(await parseErrorMessage(res));
   }
 
-  return res.json() as Promise<T>;
+  // NestJS sends an empty body (not the literal "null") when a handler
+  // returns null, e.g. GET /leads/:id/conversation for a lead with no
+  // linked conversation — res.json() would throw on that empty body.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 /**

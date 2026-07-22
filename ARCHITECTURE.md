@@ -356,7 +356,23 @@ app/
     │   │   └── page.tsx            # Manual create form
     │   └── [id]/
     │       └── page.tsx            # Detail: pre-filled edit form + availability toggle
-    └── leads/                     # Epic 11 — not built yet
+    └── leads/
+        ├── page.tsx                 # List (GET /leads, paginated) + status filter tabs
+        │                             (Todos/Nuevo/Contactado/Cerrado via ?status=) +
+        │                             inline status control per row
+        ├── actions.ts                # Server Action: updateLeadStatus (PATCH
+        │                             /leads/:id/status), called directly from the
+        │                             client — same pattern as setPropertyAvailability
+        ├── lead-status-control.tsx   # Select bound to updateLeadStatus (Client
+        │                             Component), reused in both the list rows and
+        │                             the detail header
+        └── [id]/
+            └── page.tsx              # Detail: lead fields, link to the matched
+                                      # property (if any), status control, and the
+                                      # WhatsApp conversation history (GET
+                                      # /leads/:id/conversation) rendered as a chat
+                                      # transcript, or an empty state if the lead
+                                      # wasn't created from a conversation
         ├── page.tsx                # Lead list with status filter
         └── [id]/
             └── page.tsx            # Lead detail + conversation history
