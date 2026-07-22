@@ -11,7 +11,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { OPERATION_TYPE_LABELS } from "@/lib/property-labels";
-import { LEAD_STATUS_LABELS, LEAD_STATUS_ORDER, formatLeadBudget } from "@/lib/lead-labels";
+import {
+  LEAD_STATUS_LABELS,
+  LEAD_STATUS_ORDER,
+  formatLeadBudget,
+} from "@/lib/lead-labels";
 import { LeadStatusControl } from "./lead-status-control";
 
 type LeadStatus = Enums<"lead_status">;
@@ -34,13 +38,18 @@ export default async function LeadsPage({
   const { data: leads, total } = await apiGet<{
     data: Tables<"leads">[];
     total: number;
-  }>(`/leads?page=${page}&limit=${PAGE_SIZE}${status ? `&status=${status}` : ""}`);
+  }>(
+    `/leads?page=${page}&limit=${PAGE_SIZE}${status ? `&status=${status}` : ""}`,
+  );
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const tabs: { label: string; status?: LeadStatus }[] = [
     { label: "Todos" },
-    ...LEAD_STATUS_ORDER.map((value) => ({ label: LEAD_STATUS_LABELS[value], status: value })),
+    ...LEAD_STATUS_ORDER.map((value) => ({
+      label: LEAD_STATUS_LABELS[value],
+      status: value,
+    })),
   ];
 
   return (
@@ -82,7 +91,10 @@ export default async function LeadsPage({
           <TableBody>
             {leads.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-muted-foreground"
+                >
                   No hay leads todavía.
                 </TableCell>
               </TableRow>
@@ -96,14 +108,23 @@ export default async function LeadsPage({
                 </TableCell>
                 <TableCell>{lead.phone}</TableCell>
                 <TableCell>
-                  {lead.operation_type ? OPERATION_TYPE_LABELS[lead.operation_type] : "—"}
+                  {lead.operation_type
+                    ? OPERATION_TYPE_LABELS[lead.operation_type]
+                    : "—"}
                 </TableCell>
                 <TableCell>{lead.preferred_zone || "—"}</TableCell>
                 <TableCell>
-                  {formatLeadBudget(lead.budget_min, lead.budget_max, lead.currency)}
+                  {formatLeadBudget(
+                    lead.budget_min,
+                    lead.budget_max,
+                    lead.currency,
+                  )}
                 </TableCell>
                 <TableCell>
-                  <LeadStatusControl leadId={lead.id} initialStatus={lead.status ?? "new"} />
+                  <LeadStatusControl
+                    leadId={lead.id}
+                    initialStatus={lead.status ?? "new"}
+                  />
                 </TableCell>
                 <TableCell>
                   {lead.created_at
@@ -120,7 +141,9 @@ export default async function LeadsPage({
         <div className="flex items-center justify-center gap-4">
           {page > 1 ? (
             <Button asChild variant="outline">
-              <Link href={`/leads?page=${page - 1}${status ? `&status=${status}` : ""}`}>
+              <Link
+                href={`/leads?page=${page - 1}${status ? `&status=${status}` : ""}`}
+              >
                 Anterior
               </Link>
             </Button>
@@ -134,7 +157,9 @@ export default async function LeadsPage({
           </span>
           {page < totalPages ? (
             <Button asChild variant="outline">
-              <Link href={`/leads?page=${page + 1}${status ? `&status=${status}` : ""}`}>
+              <Link
+                href={`/leads?page=${page + 1}${status ? `&status=${status}` : ""}`}
+              >
                 Siguiente
               </Link>
             </Button>

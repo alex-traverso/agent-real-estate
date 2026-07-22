@@ -72,8 +72,6 @@ export class WebhookService {
    * `messages`, so they yield nothing here — the reply-storm guard.
    */
   async processInbound(payload: WhatsAppWebhookPayload): Promise<void> {
-    // console.log(`Full Payload: `, JSON.stringify(payload, null, 2));
-
     for (const entry of payload?.entry ?? []) {
       for (const change of entry?.changes ?? []) {
         const value = change?.value;
@@ -248,21 +246,15 @@ export class WebhookService {
   }
 
   private logMessage(message: WhatsAppMessage): void {
-    // Safe in every environment: masked phone + message id/type only.
+    // Safe in every environment: masked phone + message id/type only. No
+    // NODE_ENV-gated verbose variant — a misconfigured deploy platform that
+    // never sets NODE_ENV=production would otherwise leak the full phone
+    // number and message content into production logs (SECURITY.md).
     this.logger.log(
       `[WebhookService] Message received | from: ${this.maskPhone(
         message.from,
       )} | id: ${message.id} | type: ${message.type}`,
     );
-
-    // Dev-only: show the full sender and body so the Meta connection can be
-    // verified locally. Never emitted in production (SECURITY.md).
-    if (process.env.NODE_ENV !== 'production') {
-      const body = isTextMessage(message) ? message.text.body : '(non-text)';
-      this.logger.debug(
-        `[WebhookService] (dev) from: ${message.from} | body: ${body}`,
-      );
-    }
   }
 
   private maskPhone(phone: string): string {
