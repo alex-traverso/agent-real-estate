@@ -173,15 +173,23 @@ This is the single source of truth for what needs to be built. It is organized i
   beyond the original checklist item ("detail, availability toggle") to also cover
   full manual create (`properties/new/page.tsx`) and edit — confirmed with the user,
   since `apps/api` already supported both from Epic 7.
-- [ ] `leads/page.tsx` — lead list with status filter
-- [ ] `leads/[id]/page.tsx` — lead detail + full conversation history view
+- [x] `leads/page.tsx` — lead list (`GET /leads`, paginated) with status filter tabs
+  (Todos/Nuevo/Contactado/Cerrado via `?status=`, no client JS needed for filtering) and
+  an inline status selector per row (`LeadStatusControl`, `PATCH /leads/:id/status`) for
+  quick triage without opening each lead.
+- [x] `leads/[id]/page.tsx` — lead detail (`GET /leads/:id`): all lead fields, a link to
+  the matched property when `property_id` is set, the same status selector as the list,
+  and the full WhatsApp conversation history (`GET /leads/:id/conversation`) rendered as
+  a chat transcript — or an empty state for leads not created from a conversation. Only
+  `status` is editable from the panel; there's no admin create/edit for lead fields
+  themselves (leads are only ever created by the agent's `save_lead` tool).
 - [x] All data fetching in Server Components/Server Actions (no client-side fetching) —
-  true for the properties pages built so far; applies again once the leads pages land
-- [x] RLS / tenant isolation confirmed working end-to-end for properties — verified live
-  with a second agency + admin user: logging in as that user shows zero properties from
-  "Inmobiliaria Demo". This validates `SupabaseAuthGuard`'s `agency_id` resolution (the
-  primary enforcement path per `ARCHITECTURE.md` → Auth Boundary), not raw Postgres RLS
-  directly. Re-verify once leads pages exist.
+  true for both properties and leads pages.
+- [x] RLS / tenant isolation confirmed working end-to-end for properties **and now
+  leads** — verified live with the second E2E agency + admin user (`agencia-b`):
+  leads seeded for that agency only ever show up for that agency's session. This
+  validates `SupabaseAuthGuard`'s `agency_id` resolution (the primary enforcement path
+  per `ARCHITECTURE.md` → Auth Boundary), not raw Postgres RLS directly.
 
 ---
 
