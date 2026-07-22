@@ -13,6 +13,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { WebhookSignatureGuard } from './webhook.guard';
 import { WebhookService } from './webhook.service';
+import { constantTimeEqual } from './webhook-crypto.util';
 import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
 
 @Controller('webhook')
@@ -37,7 +38,12 @@ export class WebhookController {
 
     const verifyToken = this.configService.get<string>('META_VERIFY_TOKEN');
 
-    if (mode === 'subscribe' && verifyToken && token === verifyToken) {
+    if (
+      mode === 'subscribe' &&
+      verifyToken &&
+      typeof token === 'string' &&
+      constantTimeEqual(verifyToken, token)
+    ) {
       this.logger.log('[WebhookController] Webhook verification succeeded');
       return challenge;
     }

@@ -10,6 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
+import { constantTimeEqual } from './webhook-crypto.util';
 
 const SIGNATURE_HEADER = 'x-hub-signature-256';
 
@@ -58,7 +59,7 @@ export class WebhookSignatureGuard implements CanActivate {
       'sha256=' +
       crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
 
-    if (!this.safeEqual(expected, signature)) {
+    if (!constantTimeEqual(expected, signature)) {
       this.logger.warn(
         '[WebhookSignatureGuard] Rejected request | reason: invalid signature',
       );
@@ -66,21 +67,5 @@ export class WebhookSignatureGuard implements CanActivate {
     }
 
     return true;
-  }
-
-  /**
-   * Constant-time comparison. crypto.timingSafeEqual throws if the two
-   * buffers differ in length, so a length check must gate it — a length
-   * mismatch is simply an invalid signature.
-   */
-  private safeEqual(expected: string, received: string): boolean {
-    const expectedBuffer = Buffer.from(expected);
-    const receivedBuffer = Buffer.from(received);
-
-    if (expectedBuffer.length !== receivedBuffer.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
   }
 }

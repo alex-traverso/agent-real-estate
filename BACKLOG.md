@@ -202,7 +202,28 @@ This is the single source of truth for what needs to be built. It is organized i
 - [ ] Railway production deploy verified (`main` branch)
 - [ ] Vercel production deploy verified (`main` branch)
 - [x] `.env.example` fully in sync with all variables actually used in code (superset: every var read from `process.env` is present)
-- [ ] Final full SECURITY.md checklist pass before considering v1 "done"
+- [x] Final full SECURITY.md checklist pass before considering v1 "done" —
+  audited all 8 sections (Webhook Security, Multi-tenancy, Prompt Injection,
+  Rate Limiting, Secret Management, Logging, Admin Panel Auth, Error Handling)
+  against the actual code. Result: **0 Critical/High**, 1 Medium, 3 Low — no
+  blocking issues. All 4 findings fixed on `feature/security-checklist-pass`:
+  - Medium: `webhook.service.ts`'s `logMessage` had a `NODE_ENV`-gated debug
+    log that would leak the full phone number + message body into production
+    logs if a deploy platform didn't explicitly set `NODE_ENV=production`
+    (never documented as a required env var). Removed — the masked log line
+    already logs enough (masked phone, message id, type) to debug locally.
+  - Low: `webhook.controller.ts`'s verify-token check and
+    `webhook.guard.ts`'s signature check now share one constant-time compare
+    (`webhook/webhook-crypto.util.ts`, `constantTimeEqual`) instead of the
+    verify-token check using `===`.
+  - Low: removed a commented-out `console.log` in `webhook.service.ts` that
+    would have logged the full inbound payload (phone + message content) if
+    ever reactivated.
+  - Low: `ARCHITECTURE.md` documented a `common/interceptors/logging.interceptor.ts`
+    and `common/guards/` that don't exist in the repo — doc fixed to match
+    reality (`common/` only has `supabase/`).
+  - Multi-tenancy, Prompt Injection, Rate Limiting, Secret Management, Admin
+    Panel Auth, and Error Handling all passed with no findings.
 
 ---
 

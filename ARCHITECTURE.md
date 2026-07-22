@@ -277,11 +277,8 @@ src/
 │   └── types/authenticated-request.type.ts
 │
 └── common/
-    ├── supabase/
-    │   └── supabase.service.ts     # Singleton Supabase client (service role)
-    ├── guards/
-    └── interceptors/
-        └── logging.interceptor.ts  # Request/response logging
+    └── supabase/
+        └── supabase.service.ts     # Singleton Supabase client (service role)
 ```
 
 ---
