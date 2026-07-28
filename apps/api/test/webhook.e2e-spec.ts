@@ -68,9 +68,7 @@ interface BootOptions {
  * through a multi-message scenario.
  */
 async function bootApp(options: BootOptions = {}) {
-  const sendText = jest
-    .fn<(to: string, body: string) => Promise<string>>()
-    .mockResolvedValue('wamid.OUT');
+  const sendText = jest.fn().mockResolvedValue('wamid.OUT');
 
   const resolveIdByPhoneNumberId = jest.fn((phoneNumberId: string) =>
     Promise.resolve(phoneNumberId === KNOWN_PNID ? AGENCY_ID : null),
