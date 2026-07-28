@@ -197,7 +197,7 @@ This is the single source of truth for what needs to be built. It is organized i
 
 - [x] GitHub Actions CI set up (Node 22, Corepack before `setup-node`, `.nvmrc` in place)
 - [x] Typecheck + lint + build steps for both `apps/api` and `apps/admin`
-- [ ] E2E test for full webhook flow (signature → rate limit → conversation → agent → reply)
+- [x] E2E test for full webhook flow (signature → rate limit → conversation → agent → reply): `apps/api/test/webhook.e2e-spec.ts` drives a real HTTP `POST /webhook` through the full Nest stack (raw-body + `WebhookSignatureGuard` + controller + `WebhookService`), replacing only the seven network-touching boundary services with in-memory fakes via `overrideProvider`. Covers valid signed message → agent reply, missing/invalid signature (403), unknown `phone_number_id`, Meta redelivery dedup, the 21st-message rate-limit block, message-cap escalation, agent-failure fallback, and non-text/status-only payloads. `test/setup-e2e.ts` (wired via `jest-e2e.json` `setupFiles`) provides dummy env (incl. the known `META_APP_SECRET` the spec signs with) so `AppModule` boots without real credentials. Run: `yarn workspace api test:e2e`.
 - [ ] Coverage check: 80% on services, 100% on webhook validation + rate limiting
 - [ ] Railway production deploy verified (`main` branch)
 - [ ] Vercel production deploy verified (`main` branch)
