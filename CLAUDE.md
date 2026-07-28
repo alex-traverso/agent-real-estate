@@ -231,6 +231,10 @@ GitHub Actions runs on every push and PR:
 1. Typecheck (`tsc --noEmit`) — both apps
 2. Lint (ESLint) — both apps
 3. Build verification — both apps
+4. Tests — `apps/api` only:
+   - `test:cov` — unit suite with enforced `coverageThreshold`. Global floor is 80% statements/lines/functions and 75% branches; `webhook.guard.ts` and `rate-limit.service.ts` (the security-critical files) are held at 100% statements/lines/functions and 90% branches. The sub-100% branch on those two is an unavoidable Istanbul artifact — the `__decorate` helper emitted by `@Injectable()` carries an `arguments.length` ternary no test can reach; every real branch is covered. `collectCoverageFrom` excludes non-logic files (`*.module.ts`, `main.ts`, constants, DTOs, types).
+   - `test:e2e` — the webhook end-to-end suite (`apps/api/test/*.e2e-spec.ts`).
+   - `apps/admin` has no test suite yet, so `check-admin` stays typecheck/lint/build.
 
 Failing CI blocks merging. All checks must pass before a PR can be merged to `develop`.
 

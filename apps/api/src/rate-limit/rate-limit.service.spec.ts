@@ -136,4 +136,35 @@ describe('RateLimitService', () => {
     expect(allowed).toBe(true);
     expect(upsert).not.toHaveBeenCalled();
   });
+
+  it('treats a null message_count as zero and increments to one', async () => {
+    const { supabase, upsert } = makeSupabase({
+      agency_id: 'agency-1',
+      phone: '54911111',
+      window_start: new Date().toISOString(),
+      message_count: null,
+    });
+    const service = new RateLimitService(supabase);
+
+    const allowed = await service.checkAndIncrement('agency-1', '54911111');
+
+    expect(allowed).toBe(true);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ message_count: 1 }),
+      { onConflict: 'agency_id,phone' },
+    );
+  });
+
+  it('fails soft (still allows) when persisting the window state errors', async () => {
+    const { supabase, upsert } = makeSupabase(null);
+    upsert.mockResolvedValue({ error: { message: 'db down' } });
+    const service = new RateLimitService(supabase);
+
+    const allowed = await service.checkAndIncrement('agency-1', '54911111');
+
+    // A failed persist must not block the message — the error is logged and
+    // swallowed, same fail-soft posture as the read-error path above.
+    expect(allowed).toBe(true);
+    expect(upsert).toHaveBeenCalled();
+  });
 });

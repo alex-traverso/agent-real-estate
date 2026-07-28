@@ -42,6 +42,12 @@ jobs:
       - name: Build
         run: yarn workspace api build
 
+      - name: Test (unit + coverage thresholds)
+        run: yarn workspace api test:cov
+
+      - name: Test (e2e)
+        run: yarn workspace api test:e2e
+
   check-admin:
     name: Check Admin
     runs-on: ubuntu-latest

@@ -76,8 +76,35 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.ts",
+      "!**/*.module.ts",
+      "!**/main.ts",
+      "!**/*.constants.ts",
+      "!**/index.ts",
+      "!**/*.types.ts",
+      "!**/dto/**",
+      "!**/*.spec.ts"
     ],
+    "coverageThreshold": {
+      "global": {
+        "statements": 80,
+        "lines": 80,
+        "functions": 80,
+        "branches": 75
+      },
+      "**/webhook.guard.ts": {
+        "statements": 100,
+        "lines": 100,
+        "functions": 100,
+        "branches": 90
+      },
+      "**/rate-limit.service.ts": {
+        "statements": 100,
+        "lines": 100,
+        "functions": 100,
+        "branches": 90
+      }
+    },
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   }
