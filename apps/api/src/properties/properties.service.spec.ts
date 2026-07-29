@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { PropertiesService } from './properties.service';
 import type { SupabaseService } from '../common/supabase/supabase.service';
 import type { EmbeddingsService } from '../embeddings/embeddings.service';
+import type { AdminPropertyListOptions } from './types/admin-property-list.type';
 
 type Result = { data: unknown; error: { message: string } | null };
 
@@ -80,7 +81,15 @@ function makeAdminService(
   vector: number[] = [0.1, 0.2, 0.3],
 ) {
   const builder: Record<string, jest.Mock> = {};
-  for (const method of ['select', 'eq', 'order', 'insert', 'update']) {
+  for (const method of [
+    'select',
+    'eq',
+    'ilike',
+    'or',
+    'order',
+    'insert',
+    'update',
+  ]) {
     builder[method] = jest.fn(() => builder);
   }
   const pop = () => results.shift() ?? { data: null, error: null };
@@ -99,6 +108,14 @@ function makeAdminService(
   const service = new PropertiesService(supabase, embeddings);
   return { service, builder, from, generateEmbedding };
 }
+
+/** Baseline the controller passes when the panel sends no filters. */
+const adminListOptions: AdminPropertyListOptions = {
+  page: 1,
+  limit: 20,
+  sort: 'created_at',
+  order: 'desc',
+};
 
 const createDto = {
   title: 'Depto luminoso',
@@ -361,6 +378,18 @@ describe('PropertiesService', () => {
       await expect(service.listAvailableZones('agency-1')).resolves.toEqual([]);
     });
 
+    it('covers unavailable properties too when onlyAvailable is false', async () => {
+      const { service, builder } = makeService([
+        { data: [{ zone: 'Nordelta' }], error: null },
+      ]);
+
+      const zones = await service.listAvailableZones('agency-1', false);
+
+      expect(zones).toEqual(['Nordelta']);
+      expect(builder.eq).toHaveBeenCalledWith('agency_id', 'agency-1');
+      expect(builder.eq).not.toHaveBeenCalledWith('available', true);
+    });
+
     it('throws a generic error when the query fails', async () => {
       jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       const { service } = makeService([
@@ -380,7 +409,11 @@ describe('PropertiesService', () => {
         { data: rows, error: null, count: 2 },
       ]);
 
-      const result = await service.listForAdmin('agency-1', 2, 10);
+      const result = await service.listForAdmin('agency-1', {
+        ...adminListOptions,
+        page: 2,
+        limit: 10,
+      });
 
       expect(result).toEqual({ data: rows, total: 2 });
       expect(from).toHaveBeenCalledWith('properties');
@@ -392,17 +425,104 @@ describe('PropertiesService', () => {
       expect(builder.range).toHaveBeenCalledWith(10, 19);
     });
 
-    it('includes unavailable properties (no available filter)', async () => {
+    it('includes unavailable properties when no availability filter is set', async () => {
       const { service, builder } = makeAdminService([
         { data: [], error: null, count: 0 },
       ]);
 
-      await service.listForAdmin('agency-1', 1, 20);
+      await service.listForAdmin('agency-1', adminListOptions);
 
       expect(builder.eq).not.toHaveBeenCalledWith(
         'available',
         expect.anything(),
       );
+      expect(builder.ilike).not.toHaveBeenCalled();
+      expect(builder.or).not.toHaveBeenCalled();
+    });
+
+    it('applies the operation, type and availability filters', async () => {
+      const { service, builder } = makeAdminService([
+        { data: [], error: null, count: 0 },
+      ]);
+
+      await service.listForAdmin('agency-1', {
+        ...adminListOptions,
+        operation: 'rent',
+        type: 'house',
+        available: false,
+      });
+
+      expect(builder.eq).toHaveBeenCalledWith('operation', 'rent');
+      expect(builder.eq).toHaveBeenCalledWith('type', 'house');
+      expect(builder.eq).toHaveBeenCalledWith('available', false);
+    });
+
+    it('filters by availability when it is explicitly true', async () => {
+      const { service, builder } = makeAdminService([
+        { data: [], error: null, count: 0 },
+      ]);
+
+      await service.listForAdmin('agency-1', {
+        ...adminListOptions,
+        available: true,
+      });
+
+      expect(builder.eq).toHaveBeenCalledWith('available', true);
+    });
+
+    it('matches the zone partially and case-insensitively', async () => {
+      const { service, builder } = makeAdminService([
+        { data: [], error: null, count: 0 },
+      ]);
+
+      await service.listForAdmin('agency-1', {
+        ...adminListOptions,
+        zone: 'Palermo',
+      });
+
+      expect(builder.ilike).toHaveBeenCalledWith('zone', '%Palermo%');
+    });
+
+    it('searches title and address, sanitizing the term first', async () => {
+      const { service, builder } = makeAdminService([
+        { data: [], error: null, count: 0 },
+      ]);
+
+      await service.listForAdmin('agency-1', {
+        ...adminListOptions,
+        search: 'Santa Fe,or(x)',
+      });
+
+      expect(builder.or).toHaveBeenCalledWith(
+        'title.ilike.%Santa Feorx%,address.ilike.%Santa Feorx%',
+      );
+    });
+
+    it('skips the search filter when sanitizing leaves nothing', async () => {
+      const { service, builder } = makeAdminService([
+        { data: [], error: null, count: 0 },
+      ]);
+
+      await service.listForAdmin('agency-1', {
+        ...adminListOptions,
+        search: '(),.',
+      });
+
+      expect(builder.or).not.toHaveBeenCalled();
+    });
+
+    it('orders by the requested column and direction', async () => {
+      const { service, builder } = makeAdminService([
+        { data: [], error: null, count: 0 },
+      ]);
+
+      await service.listForAdmin('agency-1', {
+        ...adminListOptions,
+        sort: 'price',
+        order: 'asc',
+      });
+
+      expect(builder.order).toHaveBeenCalledWith('price', { ascending: true });
     });
 
     it('throws a generic error when the query fails', async () => {
@@ -411,9 +531,9 @@ describe('PropertiesService', () => {
         { data: null, error: { message: 'db down' } },
       ]);
 
-      await expect(service.listForAdmin('agency-1', 1, 20)).rejects.toThrow(
-        'Failed to list properties',
-      );
+      await expect(
+        service.listForAdmin('agency-1', adminListOptions),
+      ).rejects.toThrow('Failed to list properties');
     });
   });
 

@@ -3,12 +3,14 @@ import type { PropertiesService } from './properties.service';
 
 function createController() {
   const listForAdmin = jest.fn();
+  const listAvailableZones = jest.fn();
   const getByIdForAdmin = jest.fn();
   const create = jest.fn();
   const update = jest.fn();
   const setAvailability = jest.fn();
   const properties = {
     listForAdmin,
+    listAvailableZones,
     getByIdForAdmin,
     create,
     update,
@@ -18,6 +20,7 @@ function createController() {
   return {
     controller: new PropertiesController(properties),
     listForAdmin,
+    listAvailableZones,
     getByIdForAdmin,
     create,
     update,
@@ -26,22 +29,63 @@ function createController() {
 }
 
 describe('PropertiesController', () => {
-  it('list() delegates to listForAdmin with the caller agency and pagination', async () => {
+  it('list() forwards pagination and every filter to listForAdmin', async () => {
     const { controller, listForAdmin } = createController();
     listForAdmin.mockResolvedValue({ data: [], total: 0 });
 
-    await controller.list('agency-1', { page: 2, limit: 10 });
+    await controller.list('agency-1', {
+      page: 2,
+      limit: 10,
+      search: 'Santa Fe',
+      zone: 'Palermo',
+      operation: 'rent',
+      type: 'apartment',
+      available: true,
+      sort: 'price',
+      order: 'asc',
+    });
 
-    expect(listForAdmin).toHaveBeenCalledWith('agency-1', 2, 10);
+    expect(listForAdmin).toHaveBeenCalledWith('agency-1', {
+      page: 2,
+      limit: 10,
+      search: 'Santa Fe',
+      zone: 'Palermo',
+      operation: 'rent',
+      type: 'apartment',
+      available: true,
+      sort: 'price',
+      order: 'asc',
+    });
   });
 
-  it('list() defaults page/limit when the query DTO leaves them unset', async () => {
+  it('list() defaults pagination and sorting when the query DTO leaves them unset', async () => {
     const { controller, listForAdmin } = createController();
     listForAdmin.mockResolvedValue({ data: [], total: 0 });
 
     await controller.list('agency-1', {});
 
-    expect(listForAdmin).toHaveBeenCalledWith('agency-1', 1, 20);
+    expect(listForAdmin).toHaveBeenCalledWith('agency-1', {
+      page: 1,
+      limit: 20,
+      search: undefined,
+      zone: undefined,
+      operation: undefined,
+      type: undefined,
+      available: undefined,
+      sort: 'created_at',
+      order: 'desc',
+    });
+  });
+
+  it('listZones() includes unavailable properties, unlike the agent path', async () => {
+    const { controller, listAvailableZones } = createController();
+    listAvailableZones.mockResolvedValue(['Nordelta', 'Palermo']);
+
+    await expect(controller.listZones('agency-1')).resolves.toEqual([
+      'Nordelta',
+      'Palermo',
+    ]);
+    expect(listAvailableZones).toHaveBeenCalledWith('agency-1', false);
   });
 
   it('getById() delegates to getByIdForAdmin scoped by agency', async () => {

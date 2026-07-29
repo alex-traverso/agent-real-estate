@@ -217,15 +217,32 @@ src/
 │
 ├── properties/
 │   ├── properties.module.ts
-│   ├── properties.controller.ts    # Admin CRUD (SupabaseAuthGuard-protected)
+│   ├── properties.controller.ts    # Admin CRUD (SupabaseAuthGuard-protected).
+│   │                                  GET /properties/zones is declared before
+│   │                                  GET /:id so the literal path wins the
+│   │                                  route match
 │   ├── properties.service.ts       # Agent-facing search (filters/semantic/
 │   │                                  address) + admin CRUD (list/get/create/
 │   │                                  update/setAvailability)
+│   ├── types/
+│   │   ├── property-filters.type.ts        # Agent-facing search criteria
+│   │   └── admin-property-list.type.ts     # Admin list options + the sort-column
+│   │                                          whitelist the service enforces
 │   └── dto/
 │       ├── create-property.dto.ts
 │       ├── update-property.dto.ts
 │       ├── set-availability.dto.ts
 │       └── list-properties-query.dto.ts
+│
+├── stats/
+│   ├── stats.module.ts
+│   ├── stats.controller.ts         # GET /stats — admin dashboard metrics
+│   │                                  (SupabaseAuthGuard-protected)
+│   ├── stats.service.ts            # Aggregates two narrow agency_id-scoped
+│   │                                  selects in Node (no RPC — see below)
+│   ├── stats.constants.ts          # Top-zone cap (8), trend window (30d),
+│   │                                  reporting timezone
+│   └── types/agency-stats.type.ts
 │
 ├── embeddings/
 │   ├── embeddings.module.ts
@@ -608,3 +625,5 @@ API_URL=                        # apps/api base URL. Server-only (no NEXT_PUBLIC
 | Admin frontend session handling | `@supabase/ssr` (`createBrowserClient`/`createServerClient`), `supabase.auth.getUser()` in Server Components | Official current package for Next.js App Router (supersedes deprecated `@supabase/auth-helpers-nextjs`); `getUser()` revalidates against Supabase Auth instead of trusting an unverified session cookie like `getSession()` would |
 | Admin UI components | shadcn/ui (Radix primitives, Tailwind v4) | Already the project's chosen component approach; components are copied into the repo (`components/ui/`), not an opaque dependency |
 | Notifications | Resend email | Simpler than WhatsApp-to-advisor; free tier sufficient |
+| Dashboard metrics | Aggregated in Node (`StatsService`) over two narrow `agency_id`-scoped selects, not a Postgres RPC | One agency's catalogue and lead list fit comfortably in memory at this scale, so it costs one round trip each and stays unit-testable without a database. No migration, no type regeneration, no `GRANT` to manage. If an agency outgrows it, only the two private fetches change — the `GET /stats` response shape is the contract. |
+| Property list filtering | Server-side, via `GET /properties` query params | The panel paginates, so client-side filtering would only ever filter the current page. `total` is the post-filter count, so pagination stays correct. Free text goes through `.or`, so the term is sanitized with the same helper that guards the agent's zone filter. |

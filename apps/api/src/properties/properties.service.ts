@@ -15,6 +15,7 @@ import { SupabaseService } from '../common/supabase/supabase.service';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { buildPropertyEmbeddingInput } from '../embeddings/embedding-input';
 import type { PropertyFilters } from './types/property-filters.type';
+import type { AdminPropertyListOptions } from './types/admin-property-list.type';
 import type { CreatePropertyDto } from './dto/create-property.dto';
 import type { UpdatePropertyDto } from './dto/update-property.dto';
 
@@ -93,7 +94,7 @@ export class PropertiesService {
       // goes into the PostgREST `.or` grammar, since the zones originate from
       // the client (via the agent) and could otherwise inject filter syntax.
       const zoneFilter = filters.zones
-        .map((zone) => this.sanitizeZone(zone))
+        .map((zone) => this.sanitizeFilterValue(zone))
         .filter(Boolean)
         .map((zone) => `zone.ilike.%${zone}%`)
         .join(',');
@@ -196,17 +197,29 @@ export class PropertiesService {
   }
 
   /**
-   * Returns the distinct neighborhoods (`zone`) the agency has among available
-   * properties, sorted alphabetically. The agent uses this to resolve a broad
-   * region ("zona norte") into the actual neighborhoods in the catalogue, applying its
-   * own geographic knowledge — so no region→neighborhood map is hardcoded anywhere.
+   * Returns the distinct neighborhoods (`zone`) the agency has, sorted
+   * alphabetically. The agent uses this to resolve a broad region ("zona norte")
+   * into the actual neighborhoods in the catalogue, applying its own geographic
+   * knowledge — so no region→neighborhood map is hardcoded anywhere.
+   *
+   * `onlyAvailable` defaults to true, which is what the agent needs: it must
+   * never offer a region whose listings are all delisted. The admin panel passes
+   * false, since its zone filter has to cover unavailable properties too.
    */
-  async listAvailableZones(agencyId: string): Promise<string[]> {
-    const { data, error } = await this.supabase.client
+  async listAvailableZones(
+    agencyId: string,
+    onlyAvailable = true,
+  ): Promise<string[]> {
+    let query = this.supabase.client
       .from('properties')
       .select('zone')
-      .eq('agency_id', agencyId)
-      .eq('available', true);
+      .eq('agency_id', agencyId);
+
+    if (onlyAvailable) {
+      query = query.eq('available', true);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       this.logger.error(
@@ -221,22 +234,48 @@ export class PropertiesService {
 
   /**
    * Admin panel listing: every property for the agency, available or not
-   * (unlike the agent-facing search methods above), paginated and newest
-   * first.
+   * (unlike the agent-facing search methods above), filtered by whatever the
+   * panel's filter bar has set, sorted and paginated. `total` is the count
+   * *after* filtering, so the panel can paginate the filtered result.
    */
   async listForAdmin(
     agencyId: string,
-    page: number,
-    limit: number,
+    options: AdminPropertyListOptions,
   ): Promise<{ data: Property[]; total: number }> {
+    const { page, limit, sort, order } = options;
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    const { data, error, count } = await this.supabase.client
+    let query = this.supabase.client
       .from('properties')
       .select('*', { count: 'exact' })
-      .eq('agency_id', agencyId)
-      .order('created_at', { ascending: false })
+      .eq('agency_id', agencyId);
+
+    if (options.operation) {
+      query = query.eq('operation', options.operation);
+    }
+    if (options.type) {
+      query = query.eq('type', options.type);
+    }
+    if (options.available !== undefined) {
+      query = query.eq('available', options.available);
+    }
+    if (options.zone) {
+      query = query.ilike('zone', `%${options.zone}%`);
+    }
+
+    // Free text spans two columns, so it needs `.or` — and therefore the same
+    // sanitization the agent-facing zone filter uses, since the term comes
+    // straight from the panel's search box.
+    const search = options.search
+      ? this.sanitizeFilterValue(options.search)
+      : '';
+    if (search) {
+      query = query.or(`title.ilike.%${search}%,address.ilike.%${search}%`);
+    }
+
+    const { data, error, count } = await query
+      .order(sort, { ascending: order === 'asc' })
       .range(from, to);
 
     if (error) {
@@ -449,9 +488,10 @@ export class PropertiesService {
   /**
    * Strips characters that could break the PostgREST `.or` filter grammar
    * (commas, dots, parentheses, etc.), keeping letters, numbers, spaces and
-   * hyphens. Zone values are client-influenced, so this prevents filter injection.
+   * hyphens. Applied to every value that reaches an `.or` clause — agent-supplied
+   * zones and admin-supplied search terms alike — to prevent filter injection.
    */
-  private sanitizeZone(zone: string): string {
-    return zone.replace(/[^\p{L}\p{N}\s-]/gu, '').trim();
+  private sanitizeFilterValue(value: string): string {
+    return value.replace(/[^\p{L}\p{N}\s-]/gu, '').trim();
   }
 }
