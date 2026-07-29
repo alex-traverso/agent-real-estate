@@ -32,11 +32,26 @@ export class PropertiesController {
     @CurrentAgency() agencyId: string,
     @Query() query: ListPropertiesQueryDto,
   ) {
-    return this.properties.listForAdmin(
-      agencyId,
-      query.page ?? 1,
-      query.limit ?? 20,
-    );
+    return this.properties.listForAdmin(agencyId, {
+      page: query.page ?? 1,
+      limit: query.limit ?? 20,
+      search: query.search,
+      zone: query.zone,
+      operation: query.operation,
+      type: query.type,
+      available: query.available,
+      sort: query.sort ?? 'created_at',
+      order: query.order ?? 'desc',
+    });
+  }
+
+  /**
+   * Feeds the panel's zone filter. Declared before `:id` so the literal path
+   * wins the route match — Nest resolves in declaration order.
+   */
+  @Get('zones')
+  listZones(@CurrentAgency() agencyId: string) {
+    return this.properties.listAvailableZones(agencyId, false);
   }
 
   @Get(':id')
