@@ -4,8 +4,8 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/password-input";
 import {
   Card,
   CardHeader,
@@ -49,16 +49,17 @@ export default function ResetPasswordPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Restablecer contraseña</CardTitle>
+        <CardTitle className="text-xl tracking-tight">
+          Restablecer contraseña
+        </CardTitle>
         <CardDescription>Elegí tu nueva contraseña.</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <Label htmlFor="password">Nueva contraseña</Label>
-            <Input
+            <PasswordInput
               id="password"
-              type="password"
               autoComplete="new-password"
               required
               minLength={8}
@@ -68,9 +69,8 @@ export default function ResetPasswordPage() {
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="confirmPassword">Confirmar contraseña</Label>
-            <Input
+            <PasswordInput
               id="confirmPassword"
-              type="password"
               autoComplete="new-password"
               required
               minLength={8}
