@@ -4,12 +4,23 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Design direction: "Ficha".
+ *
+ * The vocabulary of this product is not "dashboard", it is the property record
+ * an agency keeps: paper, ink, hairline rules with dimension ticks, and figures
+ * set in monospace. Light mode is warm paper with a green-grey cast; dark mode
+ * is warm ink, not an inversion of the light palette. The single accent is a
+ * deep juniper green (the colour of a registry, not of a SaaS product) and the
+ * only secondary signal is ochre, reserved for "new" and for warnings.
+ */
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -27,6 +38,10 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-signal-subtle: var(--signal-subtle);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -35,10 +50,12 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-primary-subtle: var(--primary-subtle);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-rule: var(--rule);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -49,72 +66,106 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Paper */
+  --background: oklch(0.956 0.0075 95);
+  --foreground: oklch(0.22 0.011 75);
+  --card: oklch(0.988 0.0035 95);
+  --card-foreground: oklch(0.22 0.011 75);
+  --popover: oklch(0.988 0.0035 95);
+  --popover-foreground: oklch(0.22 0.011 75);
+
+  /* Juniper — the one accent */
+  --primary: oklch(0.42 0.062 158);
+  --primary-foreground: oklch(0.98 0.005 158);
+  --primary-subtle: oklch(0.42 0.062 158 / 10%);
+
+  --secondary: oklch(0.928 0.009 95);
+  --secondary-foreground: oklch(0.28 0.012 75);
+  --muted: oklch(0.928 0.009 95);
+  --muted-foreground: oklch(0.535 0.013 80);
+  --accent: oklch(0.912 0.011 95);
+  --accent-foreground: oklch(0.24 0.012 75);
+
+  /* Ochre — reserved for "new" and warnings, never decoration */
+  --signal: oklch(0.66 0.115 68);
+  --signal-foreground: oklch(0.99 0.005 95);
+  --signal-subtle: oklch(0.66 0.115 68 / 14%);
+
+  /* Brick */
+  --destructive: oklch(0.51 0.14 30);
+  --destructive-foreground: oklch(0.99 0.005 95);
+
+  --border: oklch(0.875 0.01 90);
+  /* Hairline used by rules and dimension ticks — lighter than a real border */
+  --rule: oklch(0.875 0.01 90 / 70%);
+  --input: oklch(0.875 0.01 90);
+  --ring: oklch(0.42 0.062 158 / 45%);
+
+  /* Distinguishable at a glance and stable across both themes */
+  --chart-1: oklch(0.47 0.062 158);
+  --chart-2: oklch(0.66 0.115 68);
+  --chart-3: oklch(0.55 0.055 210);
+  --chart-4: oklch(0.6 0.08 25);
+  --chart-5: oklch(0.52 0.02 95);
+
+  --radius: 0.5rem;
+
+  --sidebar: oklch(0.934 0.009 95);
+  --sidebar-foreground: oklch(0.22 0.011 75);
+  --sidebar-primary: oklch(0.42 0.062 158);
+  --sidebar-primary-foreground: oklch(0.98 0.005 158);
+  --sidebar-accent: oklch(0.9 0.011 95);
+  --sidebar-accent-foreground: oklch(0.22 0.011 75);
+  --sidebar-border: oklch(0.868 0.011 90);
+  --sidebar-ring: oklch(0.42 0.062 158 / 45%);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
+  /* Ink — still warm, so the two themes read as the same product */
+  --background: oklch(0.19 0.008 80);
+  --foreground: oklch(0.935 0.008 90);
+  --card: oklch(0.235 0.008 80);
+  --card-foreground: oklch(0.935 0.008 90);
+  --popover: oklch(0.235 0.008 80);
+  --popover-foreground: oklch(0.935 0.008 90);
+
+  --primary: oklch(0.7 0.085 158);
+  --primary-foreground: oklch(0.17 0.012 158);
+  --primary-subtle: oklch(0.7 0.085 158 / 16%);
+
+  --secondary: oklch(0.285 0.008 80);
+  --secondary-foreground: oklch(0.935 0.008 90);
+  --muted: oklch(0.16 0.007 80);
+  --muted-foreground: oklch(0.69 0.01 85);
+  --accent: oklch(0.3 0.009 80);
+  --accent-foreground: oklch(0.955 0.008 90);
+
+  --signal: oklch(0.76 0.11 70);
+  --signal-foreground: oklch(0.19 0.012 70);
+  --signal-subtle: oklch(0.76 0.11 70 / 18%);
+
+  --destructive: oklch(0.64 0.15 30);
+  --destructive-foreground: oklch(0.98 0.005 95);
+
+  --border: oklch(1 0 0 / 11%);
+  --rule: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --ring: oklch(0.7 0.085 158 / 50%);
+
+  --chart-1: oklch(0.68 0.075 158);
+  --chart-2: oklch(0.79 0.1 68);
+  --chart-3: oklch(0.72 0.05 210);
+  --chart-4: oklch(0.75 0.07 25);
+  --chart-5: oklch(0.68 0.015 95);
+
+  --sidebar: oklch(0.165 0.008 80);
+  --sidebar-foreground: oklch(0.9 0.008 90);
+  --sidebar-primary: oklch(0.7 0.085 158);
+  --sidebar-primary-foreground: oklch(0.17 0.012 158);
+  --sidebar-accent: oklch(0.245 0.009 80);
+  --sidebar-accent-foreground: oklch(0.955 0.008 90);
+  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-ring: oklch(0.7 0.085 158 / 50%);
 }
 
 @layer base {
@@ -126,5 +177,95 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/*
+ * Type roles.
+ *
+ * Tracking is size-specific on purpose: large display text reads too loose at
+ * a single global letter-spacing, small utility text too tight. Fraunces is
+ * used with restraint — page titles, KPI figures and the price on a record —
+ * while every dense surface stays on Geist. The rule for numbers: serif when
+ * the number is a headline, mono when it is data in a row.
+ */
+@layer components {
+  .type-display {
+    font-family: var(--font-display);
+    font-size: clamp(2.25rem, 4vw, 3.25rem);
+    font-weight: 400;
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    font-variation-settings:
+      "SOFT" 20,
+      "WONK" 1;
+    font-optical-sizing: auto;
+  }
+
+  .type-title {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-variation-settings:
+      "SOFT" 20,
+      "WONK" 1;
+    font-optical-sizing: auto;
+  }
+
+  .type-subtitle {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 400;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    font-variation-settings:
+      "SOFT" 20,
+      "WONK" 1;
+    font-optical-sizing: auto;
+  }
+
+  /* Small caps label above a title or a section rule. */
+  .type-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  /* Figures in a table cell or a field: aligned columns, no serif. */
+  .type-data {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/*
+ * Accessibility floors, applied globally so no component has to remember them.
+ * Reduced motion keeps opacity changes (they aid comprehension) and drops
+ * anything that travels; reduced transparency solidifies the translucent
+ * chrome instead of leaving text over a blur.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .surface-translucent {
+    background-color: var(--background);
+    backdrop-filter: none;
   }
 }

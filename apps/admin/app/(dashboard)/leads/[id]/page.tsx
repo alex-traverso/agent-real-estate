@@ -3,7 +3,7 @@ import type { Tables } from "types";
 import { apiGet } from "@/lib/api/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { OPERATION_TYPE_LABELS } from "@/lib/property-labels";
-import { formatLeadBudget } from "@/lib/lead-labels";
+import { formatBudget } from "@/lib/format";
 import { LeadStatusControl } from "../lead-status-control";
 
 type Lead = Tables<"leads">;
@@ -56,7 +56,7 @@ export default async function LeadDetailPage({
             <LeadField label="Zona" value={lead.preferred_zone || "—"} />
             <LeadField
               label="Presupuesto"
-              value={formatLeadBudget(lead.budget_min, lead.budget_max, lead.currency)}
+              value={formatBudget(lead.budget_min, lead.budget_max, lead.currency)}
             />
             <LeadField label="Ambientes" value={lead.rooms ? String(lead.rooms) : "—"} />
             <LeadField

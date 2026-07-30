@@ -19,21 +19,3 @@ export const LEAD_STATUS_BADGE_VARIANT: Record<
   closed: "outline",
 };
 
-export function formatLeadBudget(
-  budgetMin: number | null,
-  budgetMax: number | null,
-  currency: string | null,
-): string {
-  if (budgetMin === null && budgetMax === null) return "—";
-
-  const formatter = new Intl.NumberFormat("es-AR");
-  const prefix = currency ? `${currency} ` : "";
-
-  if (budgetMin !== null && budgetMax !== null) {
-    return `${prefix}${formatter.format(budgetMin)} – ${formatter.format(budgetMax)}`;
-  }
-  if (budgetMin !== null) {
-    return `Desde ${prefix}${formatter.format(budgetMin)}`;
-  }
-  return `Hasta ${prefix}${formatter.format(budgetMax!)}`;
-}
