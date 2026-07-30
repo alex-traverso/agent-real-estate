@@ -65,6 +65,7 @@ This is the single source of truth for what needs to be built. It is organized i
 - [x] On reaching 50 messages → `EscalationService` (new shared module: `LeadsService` + `AgencyService` + `NotificationsService`) saves a lead + notifies the advisor, `ConversationService.markEscalated` flips status to `'escalated'` — same escalation path the agent's `escalate_to_advisor` tool uses, not a separate one
 - [x] TESTER: new conversation, continued conversation (<8h), expired conversation (>8h) — `conversation.service.spec.ts`; message-count boundary (at cap, past cap, under cap, escalation failure fail-soft) — `webhook.service.spec.ts`; `EscalationService` itself — `escalation.service.spec.ts`
 - [x] Per-conversation token usage persisted (`conversations.total_input_tokens` / `total_output_tokens` / `total_cache_creation_tokens` / `total_cache_read_tokens`, `BIGINT NOT NULL DEFAULT 0`): `AgentService.processMessage` accumulates usage across the tool loop and returns `{ reply, usage }`; `ConversationService.appendMessages` folds it into the assistant-turn write; fallback turns (no Claude call) record nothing — for cost-per-lead visibility without scraping logs
+- [] Before creating a lead, make sure the agent asks the potential lead for their name.
 
 ---
 
@@ -149,47 +150,47 @@ This is the single source of truth for what needs to be built. It is organized i
 ## Epic 11 — Admin Panel: Properties & Leads Management
 
 - [x] `apps/admin/lib/api/client.ts` — server-only fetch wrapper shared by every admin
-  page/action: attaches the current Supabase session's access token as `Authorization:
-  Bearer` when calling `apps/api`. `apiGet()` (Server Components — 404 → `notFound()`,
-  other failures throw, caught by `(dashboard)/error.tsx`) and `apiMutate()` (Server
-  Actions — returns `{ok, error}` instead of throwing, so forms show inline errors).
-  No CORS needed on `apps/api`: every call happens server-side (Next.js's own Node
-  process), never the browser.
+      page/action: attaches the current Supabase session's access token as `Authorization:
+Bearer` when calling `apps/api`. `apiGet()` (Server Components — 404 → `notFound()`,
+      other failures throw, caught by `(dashboard)/error.tsx`) and `apiMutate()` (Server
+      Actions — returns `{ok, error}` instead of throwing, so forms show inline errors).
+      No CORS needed on `apps/api`: every call happens server-side (Next.js's own Node
+      process), never the browser.
 - [x] `properties/page.tsx` — property list (`GET /properties`, paginated), Excel bulk
-  upload (`exceljs`; replaced an initial CSV-based version after real-world use hit two
-  rounds of parsing bugs — a delimiter mismatch from es-AR locale exports, then
-  case-sensitive headers — that native Excel + a two-step flow avoid entirely).
-  `parsePropertiesExcel` reads the `.xlsx` and validates every row against
-  `CreatePropertyDto`'s exact rules (case-insensitive/trimmed headers, native numeric
-  cell types to sidestep locale/decimal-separator ambiguity, enum checks for
-  type/operation/currency) with **zero DB writes** — returns a preview showing what's
-  valid and what's wrong per row. Only after the user clicks "Confirmar carga" does
-  `confirmPropertiesUpload` loop `POST /properties` for the valid rows (no bulk backend
-  endpoint) and return a created/failed summary. `properties/template/route.ts` serves a
-  downloadable `.xlsx` template with the correct headers + an example row.
+      upload (`exceljs`; replaced an initial CSV-based version after real-world use hit two
+      rounds of parsing bugs — a delimiter mismatch from es-AR locale exports, then
+      case-sensitive headers — that native Excel + a two-step flow avoid entirely).
+      `parsePropertiesExcel` reads the `.xlsx` and validates every row against
+      `CreatePropertyDto`'s exact rules (case-insensitive/trimmed headers, native numeric
+      cell types to sidestep locale/decimal-separator ambiguity, enum checks for
+      type/operation/currency) with **zero DB writes** — returns a preview showing what's
+      valid and what's wrong per row. Only after the user clicks "Confirmar carga" does
+      `confirmPropertiesUpload` loop `POST /properties` for the valid rows (no bulk backend
+      endpoint) and return a created/failed summary. `properties/template/route.ts` serves a
+      downloadable `.xlsx` template with the correct headers + an example row.
 - [x] `properties/[id]/page.tsx` — property detail: pre-filled, fully editable form
-  (`PATCH /properties/:id`) + an availability toggle that fires immediately
-  (`PATCH /properties/:id/availability`), independent of the form's own save. Went
-  beyond the original checklist item ("detail, availability toggle") to also cover
-  full manual create (`properties/new/page.tsx`) and edit — confirmed with the user,
-  since `apps/api` already supported both from Epic 7.
+      (`PATCH /properties/:id`) + an availability toggle that fires immediately
+      (`PATCH /properties/:id/availability`), independent of the form's own save. Went
+      beyond the original checklist item ("detail, availability toggle") to also cover
+      full manual create (`properties/new/page.tsx`) and edit — confirmed with the user,
+      since `apps/api` already supported both from Epic 7.
 - [x] `leads/page.tsx` — lead list (`GET /leads`, paginated) with status filter tabs
-  (Todos/Nuevo/Contactado/Cerrado via `?status=`, no client JS needed for filtering) and
-  an inline status selector per row (`LeadStatusControl`, `PATCH /leads/:id/status`) for
-  quick triage without opening each lead.
+      (Todos/Nuevo/Contactado/Cerrado via `?status=`, no client JS needed for filtering) and
+      an inline status selector per row (`LeadStatusControl`, `PATCH /leads/:id/status`) for
+      quick triage without opening each lead.
 - [x] `leads/[id]/page.tsx` — lead detail (`GET /leads/:id`): all lead fields, a link to
-  the matched property when `property_id` is set, the same status selector as the list,
-  and the full WhatsApp conversation history (`GET /leads/:id/conversation`) rendered as
-  a chat transcript — or an empty state for leads not created from a conversation. Only
-  `status` is editable from the panel; there's no admin create/edit for lead fields
-  themselves (leads are only ever created by the agent's `save_lead` tool).
+      the matched property when `property_id` is set, the same status selector as the list,
+      and the full WhatsApp conversation history (`GET /leads/:id/conversation`) rendered as
+      a chat transcript — or an empty state for leads not created from a conversation. Only
+      `status` is editable from the panel; there's no admin create/edit for lead fields
+      themselves (leads are only ever created by the agent's `save_lead` tool).
 - [x] All data fetching in Server Components/Server Actions (no client-side fetching) —
-  true for both properties and leads pages.
+      true for both properties and leads pages.
 - [x] RLS / tenant isolation confirmed working end-to-end for properties **and now
-  leads** — verified live with the second E2E agency + admin user (`agencia-b`):
-  leads seeded for that agency only ever show up for that agency's session. This
-  validates `SupabaseAuthGuard`'s `agency_id` resolution (the primary enforcement path
-  per `ARCHITECTURE.md` → Auth Boundary), not raw Postgres RLS directly.
+      leads** — verified live with the second E2E agency + admin user (`agencia-b`):
+      leads seeded for that agency only ever show up for that agency's session. This
+      validates `SupabaseAuthGuard`'s `agency_id` resolution (the primary enforcement path
+      per `ARCHITECTURE.md` → Auth Boundary), not raw Postgres RLS directly.
 
 ---
 
@@ -203,10 +204,10 @@ This is the single source of truth for what needs to be built. It is organized i
 - [ ] Vercel production deploy verified (`main` branch)
 - [x] `.env.example` fully in sync with all variables actually used in code (superset: every var read from `process.env` is present)
 - [x] Final full SECURITY.md checklist pass before considering v1 "done" —
-  audited all 8 sections (Webhook Security, Multi-tenancy, Prompt Injection,
-  Rate Limiting, Secret Management, Logging, Admin Panel Auth, Error Handling)
-  against the actual code. Result: **0 Critical/High**, 1 Medium, 3 Low — no
-  blocking issues. All 4 findings fixed on `feature/security-checklist-pass`:
+      audited all 8 sections (Webhook Security, Multi-tenancy, Prompt Injection,
+      Rate Limiting, Secret Management, Logging, Admin Panel Auth, Error Handling)
+      against the actual code. Result: **0 Critical/High**, 1 Medium, 3 Low — no
+      blocking issues. All 4 findings fixed on `feature/security-checklist-pass`:
   - Medium: `webhook.service.ts`'s `logMessage` had a `NODE_ENV`-gated debug
     log that would leak the full phone number + message body into production
     logs if a deploy platform didn't explicitly set `NODE_ENV=production`

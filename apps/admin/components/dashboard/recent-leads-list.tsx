@@ -1,0 +1,43 @@
+import Link from "next/link";
+import type { Tables } from "types";
+import { LEAD_STATUS_LABELS } from "@/lib/lead-labels";
+import { formatDate } from "@/lib/format";
+
+interface RecentLeadsListProps {
+  leads: Tables<"leads">[];
+}
+
+/** The most recent leads on the dashboard home, each linking to its detail page. */
+export function RecentLeadsList({ leads }: RecentLeadsListProps) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
+      <span className="type-eyebrow">Últimos leads</span>
+      {leads.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          Todavía no hay leads.
+        </p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-border">
+          {leads.map((lead) => (
+            <li key={lead.id}>
+              <Link
+                href={`/leads/${lead.id}`}
+                className="flex items-center justify-between gap-4 rounded-lg px-2 py-3 text-sm transition-colors hover:bg-muted/50"
+              >
+                <span className="font-medium text-foreground">
+                  {lead.name || "Sin nombre"}
+                </span>
+                <span className="text-muted-foreground">
+                  {lead.status ? LEAD_STATUS_LABELS[lead.status] : "—"}
+                </span>
+                <span className="type-data text-muted-foreground">
+                  {formatDate(lead.created_at)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
