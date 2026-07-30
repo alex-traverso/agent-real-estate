@@ -38,7 +38,9 @@ export default function ForgotPasswordPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Recuperar contraseña</CardTitle>
+        <CardTitle className="text-xl tracking-tight">
+          Recuperar contraseña
+        </CardTitle>
         <CardDescription>
           Te enviamos un link para restablecer tu contraseña.
         </CardDescription>

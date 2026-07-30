@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/password-input";
 import {
   Card,
   CardHeader,
@@ -47,7 +48,11 @@ export default function LoginPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Iniciar sesión</CardTitle>
+        {/* text-xl overrides CardTitle's default text-base via twMerge;
+            font-heading (Fraunces) already comes from the default className. */}
+        <CardTitle className="text-xl tracking-tight">
+          Iniciar sesión
+        </CardTitle>
         <CardDescription>
           Ingresá con tu cuenta de asesor para acceder al panel.
         </CardDescription>
@@ -67,9 +72,8 @@ export default function LoginPage() {
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="password">Contraseña</Label>
-            <Input
+            <PasswordInput
               id="password"
-              type="password"
               autoComplete="current-password"
               required
               value={password}
