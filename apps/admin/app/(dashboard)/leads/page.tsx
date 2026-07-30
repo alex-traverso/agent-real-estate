@@ -11,11 +11,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { OPERATION_TYPE_LABELS } from "@/lib/property-labels";
-import {
-  LEAD_STATUS_LABELS,
-  LEAD_STATUS_ORDER,
-  formatLeadBudget,
-} from "@/lib/lead-labels";
+import { LEAD_STATUS_LABELS, LEAD_STATUS_ORDER } from "@/lib/lead-labels";
+import { formatBudget } from "@/lib/format";
 import { LeadStatusControl } from "./lead-status-control";
 
 type LeadStatus = Enums<"lead_status">;
@@ -114,7 +111,7 @@ export default async function LeadsPage({
                 </TableCell>
                 <TableCell>{lead.preferred_zone || "—"}</TableCell>
                 <TableCell>
-                  {formatLeadBudget(
+                  {formatBudget(
                     lead.budget_min,
                     lead.budget_max,
                     lead.currency,
