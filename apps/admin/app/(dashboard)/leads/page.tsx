@@ -20,7 +20,7 @@ import type { AgencyStats } from "@/app/(dashboard)/stats.types";
 
 type LeadStatus = Enums<"lead_status">;
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 12;
 
 function isLeadStatus(value: string | undefined): value is LeadStatus {
   return LEAD_STATUS_ORDER.includes(value as LeadStatus);

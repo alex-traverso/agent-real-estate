@@ -9,7 +9,7 @@ import { PropertiesTable } from "@/components/properties/properties-table";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { ExcelUploadDialog } from "@/components/properties/excel-upload-dialog";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 12;
 
 const SORT_COLUMNS = ["created_at", "price", "title"] as const;
 type SortColumn = (typeof SORT_COLUMNS)[number];
