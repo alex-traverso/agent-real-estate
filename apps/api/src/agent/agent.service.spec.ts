@@ -366,6 +366,73 @@ describe('AgentService', () => {
     );
   });
 
+  it('rejects save_lead when the model omits the name, without persisting a lead', async () => {
+    mockCreate
+      .mockResolvedValueOnce(toolUseResponse('save_lead', {}))
+      .mockResolvedValueOnce(
+        textResponse('¿Me pasás tu nombre y apellido así te anoto?'),
+      );
+    const { service, leads } = makeService();
+
+    await service.processMessage(baseInput);
+
+    expect(leads.saveLead).not.toHaveBeenCalled();
+    const toolResult = mockCreate.mock.calls[1][0].messages[2] as {
+      content: { is_error?: boolean; content?: string }[];
+    };
+    // Soft failure: NOT is_error (that would tell Claude "technical failure,
+    // escalate" instead of "ask the client for their name and retry").
+    expect(toolResult.content[0].is_error).toBeUndefined();
+    expect(toolResult.content[0].content).toContain('missing_name');
+  });
+
+  it('rejects save_lead when the name is only whitespace or emoji', async () => {
+    mockCreate
+      .mockResolvedValueOnce(toolUseResponse('save_lead', { name: '  ' }, 't1'))
+      .mockResolvedValueOnce(textResponse('¿Cómo te llamás?'));
+    const { service, leads } = makeService();
+
+    await service.processMessage(baseInput);
+
+    expect(leads.saveLead).not.toHaveBeenCalled();
+  });
+
+  it('saves a sanitized name once the client provides a real one', async () => {
+    mockCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('save_lead', { name: '  Juan   Perez  ' }),
+      )
+      .mockResolvedValueOnce(textResponse('Listo, un asesor te contacta.'));
+    const { service, leads } = makeService();
+
+    await service.processMessage(baseInput);
+
+    expect(leads.saveLead).toHaveBeenCalledWith(
+      'agency-1',
+      expect.objectContaining({ name: 'Juan Perez' }),
+      'conv-1',
+    );
+  });
+
+  it('falls back to the WhatsApp contact name for escalate_to_advisor when the client gave none', async () => {
+    mockCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('escalate_to_advisor', {
+          reason: 'quiere hablar con una persona',
+        }),
+      )
+      .mockResolvedValueOnce(textResponse('Un asesor se va a contactar.'));
+    const { service, escalation } = makeService();
+
+    await service.processMessage({ ...baseInput, contactName: 'Alex T.' });
+
+    expect(escalation.escalate).toHaveBeenCalledWith(
+      'agency-1',
+      expect.objectContaining({ name: 'Alex T.' }),
+      'conv-1',
+    );
+  });
+
   it('escalates via EscalationService (shared with the message-cap handoff)', async () => {
     mockCreate
       .mockResolvedValueOnce(

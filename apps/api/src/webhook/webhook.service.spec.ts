@@ -12,7 +12,10 @@ import type { AgentService } from '../agent/agent.service';
 import type { RateLimitService } from '../rate-limit/rate-limit.service';
 import type { EscalationService } from '../escalation/escalation.service';
 import type { IdempotencyService } from '../idempotency/idempotency.service';
-import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
+import type {
+  WhatsAppContact,
+  WhatsAppWebhookPayload,
+} from './types/whatsapp-webhook.types';
 
 const AGENT_REPLY = 'Hola, soy Luca. ¿Buscás alquilar o comprar?';
 const SAMPLE_USAGE = {
@@ -97,7 +100,11 @@ function createService(
   };
 }
 
-function textPayload(body = 'Hola', type = 'text'): WhatsAppWebhookPayload {
+function textPayload(
+  body = 'Hola',
+  type = 'text',
+  contacts?: WhatsAppContact[],
+): WhatsAppWebhookPayload {
   return {
     object: 'whatsapp_business_account',
     entry: [
@@ -112,6 +119,7 @@ function textPayload(body = 'Hola', type = 'text'): WhatsAppWebhookPayload {
                 display_phone_number: '15550001111',
                 phone_number_id: 'pnid-123',
               },
+              ...(contacts ? { contacts } : {}),
               messages: [
                 {
                   from: '5491122223333',
@@ -293,6 +301,66 @@ describe('WebhookService', () => {
       const markOrder = checkAndMark.mock.invocationCallOrder[0];
       const rateOrder = checkAndIncrement.mock.invocationCallOrder[0];
       expect(markOrder).toBeLessThan(rateOrder);
+    });
+
+    it('passes the WhatsApp contact profile name to the agent as contactName', async () => {
+      const { service, processMessage } = createService();
+
+      await service.processInbound(
+        textPayload('Hola', 'text', [
+          { profile: { name: 'Alex T.' }, wa_id: '5491122223333' },
+        ]),
+      );
+
+      expect(processMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ contactName: 'Alex T.' }),
+      );
+    });
+
+    it('does not leak a contact name belonging to a different wa_id', async () => {
+      const { service, processMessage } = createService();
+
+      await service.processInbound(
+        textPayload('Hola', 'text', [
+          { profile: { name: 'Otra Persona' }, wa_id: '5490000000000' },
+        ]),
+      );
+
+      expect(processMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ contactName: undefined }),
+      );
+    });
+
+    it('sanitizes the contact profile name before using it', async () => {
+      const { service, processMessage } = createService();
+
+      await service.processInbound(
+        textPayload('Hola', 'text', [
+          { profile: { name: '👍' }, wa_id: '5491122223333' },
+        ]),
+      );
+
+      expect(processMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ contactName: undefined }),
+      );
+    });
+
+    it('uses the WhatsApp contact name as the lead name when escalating at the message cap', async () => {
+      const { service, escalate } = createService({
+        messageCount: MAX_MESSAGES,
+      });
+
+      await service.processInbound(
+        textPayload('Hola', 'text', [
+          { profile: { name: 'Alex T.' }, wa_id: '5491122223333' },
+        ]),
+      );
+
+      expect(escalate).toHaveBeenCalledWith(
+        'agency-1',
+        expect.objectContaining({ name: 'Alex T.' }),
+        'conv-1',
+      );
     });
 
     it('escalates and hands off when the conversation is at the message cap, without calling the agent', async () => {

@@ -7,6 +7,7 @@ import { EscalationService } from '../escalation/escalation.service';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
 import type { TokenUsage } from '../conversation/types/token-usage.type';
 import type { SaveLeadInput } from '../leads/types/lead-input.type';
+import { sanitizeLeadName } from '../leads/lead-name.util';
 import {
   DEFAULT_AGENT_MODEL,
   MAX_OUTPUT_TOKENS,
@@ -29,6 +30,13 @@ export interface ProcessMessageInput {
   conversationId: string;
   /** The client's WhatsApp number — the lead's phone, injected into save/escalate. */
   clientPhone: string;
+  /**
+   * The client's WhatsApp profile display name, if Meta sent one. Untrusted,
+   * user-chosen data (often a nickname) — used only as a silent fallback name
+   * for `escalate_to_advisor` when the client never gave one in conversation,
+   * never surfaced to the client and never a substitute for `save_lead` asking.
+   */
+  contactName?: string;
   /** Prior turns, NOT including `userText`. */
   history: StoredMessage[];
   userText: string;
@@ -46,7 +54,7 @@ export interface ProcessMessageResult {
 
 type ToolContext = Pick<
   ProcessMessageInput,
-  'agencyId' | 'conversationId' | 'clientPhone'
+  'agencyId' | 'conversationId' | 'clientPhone' | 'contactName'
 >;
 
 /**
@@ -104,6 +112,7 @@ export class AgentService {
       agencyId: input.agencyId,
       conversationId: input.conversationId,
       clientPhone: input.clientPhone,
+      contactName: input.contactName,
     };
 
     const messages: Anthropic.MessageParam[] = [
@@ -325,9 +334,25 @@ export class AgentService {
       }
 
       case TOOL_NAMES.saveLead: {
+        const toolInput = block.input as SaveLeadToolInput;
+        if (!sanitizeLeadName(toolInput.name)) {
+          // Soft failure, not a thrown error: a thrown error is flattened by
+          // runToolCalls into `is_error: true` + a generic "tool unavailable"
+          // message, which tells Claude "technical failure, escalate" — the
+          // opposite of what should happen here. This is a normal tool_result
+          // (same shape as the `default:` unknown-tool branch below) that
+          // instructs Claude to ask the client for their name and retry.
+          return JSON.stringify({
+            saved: false,
+            error: 'missing_name',
+            message:
+              "The client's full name is required before saving a lead. Ask for it, then call save_lead again once you have it.",
+          });
+        }
+
         const lead = await this.leads.saveLead(
           ctx.agencyId,
-          this.toSaveLeadInput(block.input as SaveLeadToolInput, ctx),
+          this.toSaveLeadInput(toolInput, ctx),
           ctx.conversationId,
         );
         return JSON.stringify({ saved: true, leadId: lead.id });
@@ -354,6 +379,9 @@ export class AgentService {
   /**
    * Builds a SaveLeadInput from tool input, forcing `phone` to the conversation's
    * client number and folding an optional escalation `reason` into the notes.
+   * `name` is sanitized and falls back to the WhatsApp contact profile name —
+   * a real effect only on the `escalate_to_advisor` path, since `save_lead`
+   * already rejects a missing name before reaching here.
    */
   private toSaveLeadInput(
     input: SaveLeadToolInput,
@@ -364,7 +392,7 @@ export class AgentService {
       [input.notes, reason].filter(Boolean).join(' — ') || undefined;
     return {
       phone: ctx.clientPhone,
-      name: input.name,
+      name: sanitizeLeadName(input.name) ?? ctx.contactName,
       budgetMin: input.budgetMin,
       budgetMax: input.budgetMax,
       currency: input.currency,

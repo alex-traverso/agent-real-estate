@@ -10,6 +10,7 @@ import { MAX_MESSAGES } from '../conversation/conversation.constants';
 import type { StoredMessage } from '../conversation/types/stored-message.type';
 import type { TokenUsage } from '../conversation/types/token-usage.type';
 import type { SaveLeadInput } from '../leads/types/lead-input.type';
+import { sanitizeLeadName } from '../leads/lead-name.util';
 import type { Tables } from 'types';
 import {
   FALLBACK_REPLY_ES,
@@ -19,6 +20,7 @@ import {
 } from './webhook.constants';
 import { isTextMessage } from './types/whatsapp-webhook.types';
 import type {
+  WhatsAppContact,
   WhatsAppMessage,
   WhatsAppTextMessage,
   WhatsAppWebhookPayload,
@@ -119,10 +121,28 @@ export class WebhookService {
             continue;
           }
 
-          await this.replyAndPersist(agencyId, message);
+          const contactName = this.resolveContactName(
+            value?.contacts,
+            message.from,
+          );
+          await this.replyAndPersist(agencyId, message, contactName);
         }
       }
     }
+  }
+
+  /**
+   * Looks up the WhatsApp profile display name for `phone` among the change
+   * value's `contacts`, matched strictly by `wa_id` — never taken positionally
+   * (a value can carry contacts for other recipients). Sanitized before use
+   * since it is client-chosen, untrusted data (often a nickname or emoji).
+   */
+  private resolveContactName(
+    contacts: WhatsAppContact[] | undefined,
+    phone: string,
+  ): string | undefined {
+    const contact = contacts?.find((c) => c.wa_id === phone);
+    return sanitizeLeadName(contact?.profile?.name);
   }
 
   /**
@@ -136,6 +156,7 @@ export class WebhookService {
   private async replyAndPersist(
     agencyId: string,
     message: WhatsAppTextMessage,
+    contactName?: string,
   ): Promise<void> {
     let conversation = await this.conversationService.getOrCreateActive(
       agencyId,
@@ -143,7 +164,12 @@ export class WebhookService {
     );
 
     if ((conversation.message_count ?? 0) >= MAX_MESSAGES) {
-      await this.escalateAtCap(agencyId, conversation, message.from);
+      await this.escalateAtCap(
+        agencyId,
+        conversation,
+        message.from,
+        contactName,
+      );
       return;
     }
 
@@ -166,6 +192,7 @@ export class WebhookService {
       conversation.id,
       message,
       priorHistory,
+      contactName,
     );
 
     await this.whatsapp.sendText(message.from, reply);
@@ -198,9 +225,14 @@ export class WebhookService {
     agencyId: string,
     conversation: Conversation,
     phone: string,
+    contactName?: string,
   ): Promise<void> {
     try {
-      const input: SaveLeadInput = { phone, notes: MESSAGE_CAP_NOTE };
+      const input: SaveLeadInput = {
+        phone,
+        name: contactName,
+        notes: MESSAGE_CAP_NOTE,
+      };
       await this.escalation.escalate(agencyId, input, conversation.id);
       await this.conversationService.markEscalated(conversation.id, agencyId);
       await this.whatsapp.sendText(phone, MESSAGE_CAP_REPLY_ES);
@@ -225,12 +257,14 @@ export class WebhookService {
     conversationId: string,
     message: WhatsAppTextMessage,
     priorHistory: StoredMessage[],
+    contactName?: string,
   ): Promise<{ reply: string; usage: TokenUsage | null }> {
     try {
       const { reply, usage } = await this.agent.processMessage({
         agencyId,
         conversationId,
         clientPhone: message.from,
+        contactName,
         history: priorHistory,
         userText: message.text.body,
       });
