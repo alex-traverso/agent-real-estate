@@ -1,3 +1,4 @@
 {
+  "installCommand": "corepack enable && cd ../.. && yarn install --immutable",
   "buildCommand": "cd ../.. && yarn workspace types build && yarn workspace admin build"
 }
