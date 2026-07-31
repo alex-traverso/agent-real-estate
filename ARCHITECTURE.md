@@ -31,7 +31,7 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 │          │ deploy                      │ deploy                 │
 └──────────┼─────────────────────────────┼───────────────────────┘
            ↓                             ↓
-      Railway                        Vercel
+      Render                         Vercel
    (NestJS API)                  (Next.js Admin)
            │                             │
            └──────────────┬──────────────┘
@@ -43,7 +43,7 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 ### Hosting
 | Service | Platform | Plan |
 |---------|----------|------|
-| NestJS API | Railway | Free tier |
+| NestJS API | Render | Free tier |
 | Next.js Admin | Vercel | Hobby (free) |
 | Database | Supabase | Free tier |
 | Email | Resend | Free tier (3000/month) |
@@ -53,7 +53,7 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 | Service | Purpose |
 |---------|---------|
 | Meta Cloud API | WhatsApp messaging (send/receive) |
-| Anthropic Claude API (`claude-haiku-4-5`) | AI agent (conversation, tool calling) |
+| Anthropic Claude API (`claude-sonnet-4-6`) | AI agent (conversation, tool calling, prompt caching) |
 | OpenAI API (`text-embedding-3-small`) | Generating property and query embeddings |
 
 ---
@@ -67,48 +67,115 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
          ↓
 2. Meta Cloud API sends POST to /webhook
          ↓
-3. WebhookGuard validates X-Hub-Signature-256
+3. WebhookSignatureGuard validates X-Hub-Signature-256
    → Invalid: return 403, stop
    → Valid: continue
          ↓
-4. RateLimitGuard checks rate_limits table
-   → phone >= 20 messages in last 60s: return polite message + HTTP 200, stop
-   → OK: increment counter, continue
+4. WebhookController returns HTTP 200 to Meta immediately (fire-and-forget) and
+   dispatches WebhookService.processInbound in the background — a slow or
+   non-200 response makes Meta retry the same event, causing duplicate replies
          ↓
-5. WebhookController extracts message payload
+5. WebhookService extracts the message payload, resolves the tenant
+   (metadata.phone_number_id → agency_id, via AgencyService)
          ↓
-6. ConversationService loads or creates conversation
+6. IdempotencyService checks the processed_messages table (agency_id,
+   message.id / wamid)
+   → Already processed (Meta redelivery): skip silently — no reply, no
+     rate-limit consumption, no persistence, no AgentService/Claude call
+   → First delivery: insert the record (UNIQUE constraint is the atomic dedup
+     barrier), continue
+         ↓
+7. RateLimitService checks the rate_limits table (agency_id, phone)
+   → phone >= 20 messages in the last 60s: send a polite WhatsApp reply
+     directly and stop — no ConversationService, no AgentService/Claude call
+   → OK: upsert the window (increment or reset), continue
+         ↓
+8. ConversationService loads or creates conversation
    → New phone or session expired (8h): create new conversation
    → Existing: load full message history
          ↓
-7. Check message_count >= 50
-   → Yes: escalate to advisor, close conversation
+9. Check message_count >= 50 (right after loading the conversation, before
+   persisting the inbound turn)
+   → Yes: EscalationService saves a lead + notifies the advisor,
+     ConversationService.markEscalated flips status to 'escalated', client
+     gets a handoff message — no AgentService/Claude call, nothing appended
+     to history for this message. Same fail-soft posture as rate limiting:
+     if the escalation itself fails, the client gets the generic fallback
+     and the conversation stays 'active' so the next message retries.
    → No: continue
          ↓
-8. AgentService calls Claude API
+10. AgentService calls Claude API
    → Sends: system prompt + full conversation history + available tools
    → Claude responds with text or tool call
          ↓
-9. If Claude calls a tool:
+11. If Claude calls a tool:
    → search_properties_by_filters   → PropertiesService → Supabase query
    → search_properties_semantic     → EmbeddingsService (OpenAI) → pgvector RPC
    → search_property_by_address     → PropertiesService → Supabase query
    → save_lead                      → LeadsService → Supabase insert
-   → escalate_to_advisor            → LeadsService + NotificationsService (Resend)
+   → escalate_to_advisor            → EscalationService (LeadsService +
+                                       AgencyService + NotificationsService) —
+                                       the same service the step-9 cap
+                                       handoff uses, one escalation path
    → Tool result sent back to Claude
    → Claude generates final response
          ↓
-10. ConversationService saves updated history to Supabase
+12. ConversationService saves updated history to Supabase, folding the turn's
+    accumulated token usage into the same write (conversations.total_*_tokens,
+    for cost-per-lead visibility)
           ↓
-11. WebhookService calls WhatsAppService (messaging module) to send the
+13. WebhookService calls WhatsAppService (messaging module) to send the
     response to the client via Meta Cloud API
-          ↓
-12. Return HTTP 200 to Meta
 
-> **Current state:** steps 6–10 (conversation + agent) are not built yet.
-> The webhook receives and verifies messages, then WebhookService replies to
-> any inbound text with a fixed Spanish placeholder ("Luca in development")
-> via WhatsAppService. This is the interim behavior until the agent is wired.
+> **Why rate limiting isn't a `Guard`:** step 4 is fire-and-forget — the
+> controller answers Meta before any message is even parsed. The phone number
+> and its `agency_id` are only known inside `WebhookService.processInbound`,
+> after per-message tenant resolution (step 5). A `CanActivate` guard runs
+> before the controller method and has no access to that async, per-message
+> state, so `RateLimitService` is a plain injectable called directly from
+> `WebhookService`, not an HTTP-level guard.
+
+> **Current state:** the agent is **live**. The webhook receives and verifies
+> messages, resolves the tenant from `metadata.phone_number_id` (→
+> `agencies.whatsapp_phone_number_id`, via AgencyService), dedups Meta
+> redeliveries (`IdempotencyService`, keyed by `message.id` in
+> `processed_messages` — see step 6), checks the rate limit (`RateLimitService`,
+> 20 msg/min per phone, persisted in `rate_limits` so it survives restarts),
+> loads/creates the conversation (ConversationService, 8h session timeout),
+> checks the 50-message cap (escalates via `EscalationService` +
+> `ConversationService.markEscalated` and returns early if hit — see step 9),
+> persists the inbound turn, then delegates the reply to
+> `AgentService.processMessage` (Luca) and sends it via WhatsAppService. On any
+> agent failure a generic Spanish fallback is sent — the internal error is
+> never surfaced to the client. History is stored
+> in `conversations.messages` as Claude-shaped `{ role, content }` (+ timestamp,
+> whatsapp_message_id). `WebhookService.resolveContactName` also reads the
+> WhatsApp profile display name from `value.contacts` (matched strictly by
+> `wa_id`, sanitized) and threads it through as `contactName` — untrusted,
+> client-chosen data used only as a silent fallback lead name for
+> `escalate_to_advisor`, never shown to the client and never a substitute for
+> Luca asking directly (see `save_lead` below).
+>
+> `AgentService` runs the Claude (`claude-sonnet-4-6`) tool-calling loop with a
+> versioned Spanish system prompt (`agent/prompts/system.prompt.ts`) and six
+> tools (`agent/tools/*.ts`): `list_available_zones`,
+> `search_properties_by_filters`, `search_properties_semantic`,
+> `search_property_by_address`, `save_lead`, `escalate_to_advisor`. Search is
+> backed by `PropertiesService` / `EmbeddingsService` (the semantic path via
+> the `search_properties_semantic` pgvector RPC); leads by `LeadsService`;
+> escalation composes `LeadsService` + `AgencyService.getContactEmail` +
+> `NotificationsService` (Resend, non-blocking). Every path is scoped by
+> `agency_id`, the system prompt never contains client text, and the lead
+> `phone` is taken from the conversation, never from the model. `save_lead`'s
+> tool schema requires `name`: if the client hasn't given one, `AgentService`
+> returns a soft (non-`is_error`) tool_result telling Claude to ask for it and
+> retry, rather than persisting a nameless lead — `escalate_to_advisor` keeps
+> `name` optional (falling back to `contactName`) so a client who refuses to
+> give their name is still handed off. The request to
+> Claude uses prompt caching (see "Prompt Caching Strategy" below) and
+> disables thinking explicitly, since Luca's replies are short and
+> conversational. Both admin-facing controllers (`PropertiesController`,
+> `LeadsController` — see Auth Boundary above) are live.
 ```
 
 ---
@@ -132,6 +199,20 @@ src/
 │   ├── messaging.constants.ts      # Graph API base URL + pinned version
 │   └── whatsapp.service.ts         # Sends messages via Meta Cloud API (reusable)
 │
+├── agency/
+│   ├── agency.module.ts
+│   ├── agency.service.ts           # Resolves phone_number_id → agency_id (cached);
+│   │                                  findByUserId + createForUser for onboarding
+│   ├── agency.controller.ts        # GET /agencies/me, POST /agencies —
+│   │                                  SupabaseUserGuard, not SupabaseAuthGuard
+│   └── dto/create-agency.dto.ts
+│
+├── conversation/
+│   ├── conversation.module.ts
+│   ├── conversation.constants.ts   # Session timeout (8h), message cap (50)
+│   ├── conversation.service.ts     # Load/create + append history (per agency_id)
+│   └── types/stored-message.type.ts
+│
 ├── agent/
 │   ├── agent.module.ts
 │   ├── agent.service.ts            # Orchestrates Claude API calls and tool execution
@@ -150,11 +231,35 @@ src/
 │
 ├── properties/
 │   ├── properties.module.ts
-│   ├── properties.controller.ts    # CRUD endpoints for admin panel
-│   ├── properties.service.ts       # Filter search + address search
+│   ├── properties.controller.ts    # Admin CRUD (SupabaseAuthGuard-protected).
+│   │                                  GET /properties/zones is declared before
+│   │                                  GET /:id so the literal path wins the
+│   │                                  route match. GET /properties accepts
+│   │                                  page/limit plus admin list filters:
+│   │                                  search, zone, operation, type, available,
+│   │                                  sort (created_at|price|title), order (asc|desc)
+│   ├── properties.service.ts       # Agent-facing search (filters/semantic/
+│   │                                  address) + admin CRUD (list/get/create/
+│   │                                  update/setAvailability)
+│   ├── types/
+│   │   ├── property-filters.type.ts        # Agent-facing search criteria
+│   │   └── admin-property-list.type.ts     # Admin list options + the sort-column
+│   │                                          whitelist the service enforces
 │   └── dto/
 │       ├── create-property.dto.ts
-│       └── search-properties.dto.ts
+│       ├── update-property.dto.ts
+│       ├── set-availability.dto.ts
+│       └── list-properties-query.dto.ts
+│
+├── stats/
+│   ├── stats.module.ts
+│   ├── stats.controller.ts         # GET /stats — admin dashboard metrics
+│   │                                  (SupabaseAuthGuard-protected)
+│   ├── stats.service.ts            # Aggregates two narrow agency_id-scoped
+│   │                                  selects in Node (no RPC — see below)
+│   ├── stats.constants.ts          # Top-zone cap (8), trend window (30d),
+│   │                                  reporting timezone
+│   └── types/agency-stats.type.ts
 │
 ├── embeddings/
 │   ├── embeddings.module.ts
@@ -162,50 +267,245 @@ src/
 │
 ├── leads/
 │   ├── leads.module.ts
-│   ├── leads.controller.ts         # CRUD endpoints for admin panel
-│   ├── leads.service.ts            # Lead creation, status updates
+│   ├── leads.controller.ts         # Admin read/status-update (SupabaseAuthGuard-
+│   │                                  protected); no create route — leads only
+│   │                                  come from the agent's save_lead tool
+│   ├── leads.service.ts            # Agent-facing saveLead + admin methods
+│   │                                  (list/get/getConversationForLead/updateStatus)
 │   └── dto/
-│       └── create-lead.dto.ts
+│       ├── update-lead-status.dto.ts
+│       └── list-leads-query.dto.ts
 │
 ├── notifications/
 │   ├── notifications.module.ts
 │   └── notifications.service.ts    # Resend email notifications to advisors
 │
+├── escalation/
+│   ├── escalation.module.ts
+│   └── escalation.service.ts       # Composes Leads + Agency + Notifications;
+│                                      shared by the agent's escalate_to_advisor
+│                                      tool and the webhook's message-cap handoff
+│
 ├── rate-limit/
 │   ├── rate-limit.module.ts
-│   ├── rate-limit.service.ts       # Check and increment rate_limits table
-│   └── rate-limit.guard.ts         # Applied to webhook endpoint
+│   ├── rate-limit.service.ts       # Checks/upserts rate_limits; called from
+│   │                                 WebhookService (not a Guard — see
+│   │                                 Full Request Flow above for why)
+│   └── rate-limit.constants.ts     # Max messages (20) + window (60s)
+│
+├── idempotency/
+│   ├── idempotency.module.ts
+│   └── idempotency.service.ts      # Dedups on message.id via processed_messages
+│                                      (UNIQUE agency_id+message_id); called from
+│                                      WebhookService right after tenant
+│                                      resolution, before the rate limit
+│
+├── auth/
+│   ├── auth.module.ts
+│   ├── supabase-token.util.ts      # Shared token verification (extract Bearer +
+│   │                                  supabase.auth.getUser), used by both guards
+│   │                                  below so they can never diverge on it
+│   ├── supabase-auth.guard.ts      # Admin panel auth: verifies the token via the
+│   │                                  util above, then resolves agency_id via
+│   │                                  agency_users, attaches { userId, agencyId }
+│   │                                  to the request — see Auth Boundary above
+│   ├── supabase-user.guard.ts      # Onboarding-only variant: verifies the token
+│   │                                  but never looks up agency_users — the one
+│   │                                  guard that must not reject an agency-less
+│   │                                  user (agencies.controller.ts)
+│   ├── current-agency.decorator.ts # @CurrentAgency() — reads the resolved
+│   │                                  agency_id set by SupabaseAuthGuard
+│   ├── current-user.decorator.ts   # @CurrentUser() — reads the userId set by
+│   │                                  SupabaseUserGuard
+│   ├── types/authenticated-request.type.ts
+│   └── types/authenticated-user-request.type.ts
 │
 └── common/
-    ├── supabase/
-    │   └── supabase.service.ts     # Singleton Supabase client (service role)
-    ├── guards/
-    └── interceptors/
-        └── logging.interceptor.ts  # Request/response logging
+    └── supabase/
+        └── supabase.service.ts     # Singleton Supabase client (service role)
 ```
 
 ---
 
 ## Module Structure — `apps/admin`
 
+No `src/` directory — the App Router lives directly under `apps/admin/app/`.
+
 ```
-src/
-└── app/
-    ├── layout.tsx                  # Root layout
-    ├── (auth)/
-    │   └── login/
-    │       └── page.tsx            # Login page (Spanish UI)
-    └── (dashboard)/
-        ├── layout.tsx              # Protected layout — verifies Supabase Auth session
-        ├── page.tsx                # Dashboard home
-        ├── properties/
-        │   ├── page.tsx            # Property list + CSV upload
-        │   └── [id]/
-        │       └── page.tsx        # Property detail + availability toggle
-        └── leads/
-            ├── page.tsx            # Lead list with status filter
-            └── [id]/
-                └── page.tsx        # Lead detail + conversation history
+proxy.ts                          # Root proxy (formerly "middleware"): refreshes
+                                     the Supabase session cookie on every request
+                                     via lib/supabase/middleware.ts. Does not
+                                     redirect — that's the (dashboard) layout's job.
+components.json                   # shadcn/ui config (style: radix-nova, neutral base)
+lib/
+├── utils.ts                       # shadcn's `cn()` helper
+├── format.ts                      # formatPrice/formatArea/formatNumber/formatDate/
+│                                     formatBudget/formatPhone + EMPTY_VALUE ("—")
+├── motion.ts                      # The panel's motion vocabulary: springDefault/
+│                                     springMomentum/springSheet/fadeOnly transitions,
+│                                     REVEAL_STAGGER/REVEAL_DISTANCE + revealVariants()
+│                                     for staggered list reveals
+├── lead-labels.ts                 # LEAD_STATUS_LABELS, LEAD_STATUS_ORDER (Spanish)
+├── property-labels.ts             # OPERATION_TYPE_LABELS, PROPERTY_TYPE_LABELS (Spanish)
+├── api/
+│   └── client.ts                  # Server-only fetch wrapper for apps/api: attaches the
+│                                     current Supabase session's access token as Bearer.
+│                                     apiGet() (Server Components, throws/notFound() on
+│                                     failure) and apiMutate() (Server Actions, returns
+│                                     {ok,error} instead of throwing). Never called from
+│                                     the browser — no CORS involved on apps/api.
+└── supabase/
+    ├── client.ts                  # Browser client (Client Components: login, forms)
+    ├── server.ts                  # Server client (Server Components, reads/writes
+    │                                 cookies via next/headers)
+    └── middleware.ts               # updateSession() — called from proxy.ts
+components/
+├── ui/                            # shadcn/ui primitives (button, input, label, card,
+│                                     table, badge, select, textarea, switch, tabs,
+│                                     tooltip, dialog, sheet, dropdown-menu, avatar,
+│                                     separator, skeleton, sonner, pagination, …) plus
+│                                     data-pagination.tsx — the shared page/limit
+│                                     pagination control (generalized in PR F; used by
+│                                     both properties and leads, not properties-specific
+│                                     despite living under components/ui/)
+├── motion/
+│   └── reveal.tsx                 # <Stagger>/<RevealItem>/<Reveal> — staggered-reveal
+│                                     primitives built on lib/motion.ts's revealVariants(),
+│                                     each already reading useReducedMotion() internally
+├── shell/                         # Dashboard chrome, shared by every (dashboard) route
+│   ├── dashboard-shell.tsx        # Client Component: owns sidebar-collapsed state
+│   │                                 (persisted to localStorage), composes AppSidebar
+│   │                                 + Topbar + a centered content well
+│   ├── app-sidebar.tsx            # Desktop nav rail (hidden below `md`), animated
+│   │                                 width-collapse via motion.aside + springDefault
+│   ├── mobile-nav.tsx             # Sheet-based nav for below `md`, same NAV_ITEMS
+│   ├── nav-items.ts               # NAV_ITEMS + isNavItemActive() — single source of
+│   │                                 truth shared by AppSidebar and MobileNav
+│   ├── topbar.tsx                 # Sticky header: MobileNav trigger, breadcrumb, UserMenu
+│   ├── breadcrumb-trail.tsx       # Route-derived breadcrumb, aria-current on the leaf
+│   ├── page-header.tsx            # Eyebrow + title, used at the top of every page
+│   ├── theme-toggle.tsx           # Light/dark switch (next-themes)
+│   ├── user-menu.tsx              # Avatar dropdown: agency/user info + logout
+│   └── brand.tsx                  # "Luca" wordmark used in the sidebar header
+├── dashboard/                     # Dashboard home widgets, all consuming AgencyStats
+│   ├── stat-tiles.tsx             # 4 KPI tiles, staggered reveal on mount
+│   ├── chart-panel.tsx            # Card chrome wrapper shared by both charts below
+│   ├── leads-trend-chart.tsx      # Recharts line chart — leads per day (30d)
+│   ├── top-zones-chart.tsx        # Recharts bar chart — property count by zone
+│   └── recent-leads-list.tsx      # Latest leads, staggered reveal, links to detail
+├── properties/
+│   ├── filter-bar.tsx             # URL-state filters: search (debounced) + zone/
+│   │                                 operation/type/available selects; each
+│   │                                 SelectTrigger carries an explicit aria-label
+│   │                                 since the visible placeholder disappears once
+│   │                                 a value is picked
+│   ├── properties-table.tsx       # TanStack Table: manual sort/pagination (state
+│   │                                 lives in the URL), column visibility, staggered
+│   │                                 row reveal via <Stagger as="tbody">/<RevealItem as="tr">
+│   ├── excel-upload-dialog.tsx    # Dialog wrapper around the bulk-upload flow
+│   └── property-form-section.tsx  # Card wrapper for a group of related fields in
+│                                     property-form.tsx (Identificación, Ubicación, …)
+├── leads/
+│   ├── leads-tabs.tsx             # Status filter tabs (Todos/Nuevo/Contactado/Cerrado),
+│   │                                 aria-current on the active tab
+│   └── lead-status-menu.tsx       # Dropdown bound to updateLeadStatus, reused in both
+│                                     the list rows and the detail header
+├── skeletons/                     # loading.tsx fallbacks, one per page shape
+│   ├── table-skeleton.tsx         # Properties/leads list tables
+│   ├── detail-skeleton.tsx        # Property/lead detail pages
+│   ├── chat-skeleton.tsx          # Lead detail's WhatsApp conversation transcript
+│   ├── stat-tiles-skeleton.tsx    # Mirrors StatTiles' markup so the dashboard home
+│   │                                 doesn't shift layout between loading and loaded
+│   └── chart-panel-skeleton.tsx   # Mirrors ChartPanel's card chrome
+├── password-input.tsx             # Reused by login/forgot-password/reset-password
+└── theme-provider.tsx             # next-themes provider, wraps the root layout
+app/
+├── layout.tsx                     # Root layout — fonts, globals.css, {children}
+├── globals.css                    # Tailwind v4 + shadcn theme tokens, global
+│                                     prefers-reduced-motion/prefers-reduced-transparency
+│                                     rules
+├── not-found.tsx                  # Root-level 404 (outside the auth check)
+├── (auth)/
+│   ├── layout.tsx                 # Split-screen shell (brand + card), no dashboard
+│   │                                 nav. Not "public pages" — onboarding below
+│   │                                 still requires a session, it just isn't
+│   │                                 dashboard chrome
+│   ├── login/
+│   │   └── page.tsx               # Login (Spanish UI), no self-signup
+│   ├── forgot-password/
+│   │   └── page.tsx               # Requests a password-reset email
+│   ├── reset-password/
+│   │   └── page.tsx               # Sets a new password (landed on via the reset email)
+│   └── onboarding/
+│       ├── page.tsx               # GET /agencies/me: redirects to /login (no
+│       │                            session) or / (already has an agency);
+│       │                            otherwise renders the form with the user's
+│       │                            email prefilled
+│       ├── onboarding-form.tsx    # useActionState form (name, email, phone)
+│       └── actions.ts             # createAgency — POST /agencies, redirects to
+│                                     / on success, inline error otherwise
+└── (dashboard)/
+    ├── layout.tsx                 # Protected layout — Server Component,
+    │                                 supabase.auth.getUser() + redirect('/login')
+    │                                 if unauthenticated; then GET /agencies/me +
+    │                                 redirect('/onboarding') if the user has no
+    │                                 agency yet; renders DashboardShell
+    ├── actions.ts                 # 'use server' — logout() (signOut + redirect)
+    ├── error.tsx                  # Client Component boundary — generic Spanish
+    │                                 error + retry, catches apiGet()/action throws
+    ├── not-found.tsx               # Dashboard-scoped 404
+    ├── loading.tsx                 # Route-level fallback for pages without their own
+    ├── stats.types.ts              # AgencyStats — the GET /stats response shape,
+    │                                 shared by the dashboard home, StatTiles, both
+    │                                 charts and LeadsTabs' per-status counts
+    ├── page.tsx                    # Dashboard home: GET /stats + latest 5 leads →
+    │                                 StatTiles + LeadsTrendChart + TopZonesChart +
+    │                                 RecentLeadsList, or an empty-catalog prompt when
+    │                                 stats.properties.total is 0
+    ├── properties/
+    │   ├── page.tsx                # List (GET /properties, paginated/filtered/sorted
+    │   │                             via FilterBar + PropertiesTable) + Excel upload
+    │   ├── loading.tsx              # TableSkeleton fallback
+    │   ├── actions.ts              # Server Actions: createProperty, updateProperty,
+    │   │                             setPropertyAvailability, parsePropertiesExcel,
+    │   │                             confirmPropertiesUpload
+    │   ├── property-form.tsx       # Shared create/edit form (Client Component)
+    │   ├── excel-upload-form.tsx   # Excel bulk upload (Client Component, two-step):
+    │   │                             parsePropertiesExcel validates the uploaded
+    │   │                             .xlsx (no DB writes, case-insensitive headers,
+    │   │                             native Excel numeric types) and renders a
+    │   │                             preview table; confirmPropertiesUpload then
+    │   │                             POSTs only the valid rows once the user clicks
+    │   │                             "Confirmar carga" — no bulk endpoint, loops
+    │   │                             POST /properties per row
+    │   ├── template/
+    │   │   └── route.ts            # GET — streams a downloadable .xlsx template
+    │   │                             with the correct headers + an example row
+    │   │                             (auth-checked directly, Route Handlers aren't
+    │   │                             wrapped by the dashboard layout's auth check)
+    │   ├── availability-toggle.tsx # Switch bound directly to setPropertyAvailability,
+    │   │                             id/htmlFor-associated with its Label for a11y
+    │   ├── new/
+    │   │   └── page.tsx            # Manual create form
+    │   └── [id]/
+    │       ├── page.tsx            # Detail: pre-filled edit form + availability toggle
+    │       └── loading.tsx          # DetailSkeleton fallback
+    └── leads/
+        ├── page.tsx                 # List (GET /leads, paginated) + status filter tabs
+        │                             (Todos/Nuevo/Contactado/Cerrado via ?status=) +
+        │                             inline status control per row, staggered row reveal
+        ├── loading.tsx               # TableSkeleton fallback
+        ├── actions.ts                # Server Action: updateLeadStatus (PATCH
+        │                             /leads/:id/status), called directly from the
+        │                             client — same pattern as setPropertyAvailability
+        └── [id]/
+            ├── page.tsx              # Detail: lead fields, link to the matched
+            │                         # property (if any), status control, and the
+            │                         # WhatsApp conversation history (GET
+            │                         # /leads/:id/conversation) rendered as a chat
+            │                         # transcript, or an empty state if the lead
+            │                         # wasn't created from a conversation
+            └── loading.tsx           # DetailSkeleton + ChatSkeleton fallback
 ```
 
 ---
@@ -223,7 +523,8 @@ agencies
   │     └── properties (property_id FK, optional)
   ├── conversations (agency_id FK)
   │     └── leads (lead_id FK, optional)
-  └── rate_limits (agency_id FK)
+  ├── rate_limits (agency_id FK)
+  └── processed_messages (agency_id FK)
 ```
 
 ### Table Summary
@@ -234,8 +535,9 @@ agencies
 | `agency_users` | Maps Supabase Auth users to their agency (drives admin panel RLS) | `agency_id`, `user_id` |
 | `properties` | Real estate listings | `agency_id`, `type`, `operation`, `price`, `zone`, `embedding` |
 | `leads` | Qualified prospects | `agency_id`, `phone`, `status`, `property_id` |
-| `conversations` | WhatsApp history | `agency_id`, `phone`, `messages` (JSONB), `message_count` |
+| `conversations` | WhatsApp history | `agency_id`, `phone`, `messages` (JSONB), `message_count`, `total_*_tokens` (accumulated Claude usage) |
 | `rate_limits` | Rate limiting state | `agency_id`, `phone`, `window_start`, `message_count` |
+| `processed_messages` | Idempotency (Meta redelivery dedup) | `agency_id`, `message_id` (`UNIQUE` together), `created_at` |
 
 `pgvector` is installed in the `extensions` schema (not `public`), per Supabase's security linter recommendations.
 
@@ -251,9 +553,9 @@ Full schema definition is in `.agents/DB.md`. Generated TypeScript types are in 
 AgentService.processMessage(history, agencyId)
         ↓
 Call Claude API with:
-  - system prompt (system.prompt.ts)
-  - full conversation history
-  - tool definitions (5 tools)
+  - system prompt (system.prompt.ts), cached
+  - full conversation history, cached up to the newest turn
+  - tool definitions (6 tools), cached
         ↓
 Claude returns: text | tool_use
         ↓
@@ -270,11 +572,32 @@ Return final text to WebhookService
 
 | Tool | Input | Output |
 |------|-------|--------|
+| `list_available_zones` | (none) | string[] of loaded zones/neighborhoods |
 | `search_properties_by_filters` | operation, zone, rooms, max_price, currency, type | Property[] |
 | `search_properties_semantic` | query_text, operation, match_count | Property[] with similarity score |
 | `search_property_by_address` | address, zone | Property or null |
-| `save_lead` | name, phone, operation_type, zone, budget, rooms, property_id, notes | Lead |
-| `escalate_to_advisor` | phone, reason, conversation_summary | void (sends email) |
+| `save_lead` | **name (required)**, phone, operation_type, zone, budget, rooms, property_id, notes | Lead |
+| `escalate_to_advisor` | name (optional — falls back to the WhatsApp contact profile name), phone, reason, conversation_summary | void (sends email) |
+
+### Prompt Caching Strategy
+
+The API's prompt render order is `tools` → `system` → `messages`, and caching is a prefix match (any change invalidates everything after it). `AgentService` uses this deliberately to keep Sonnet-tier cost down on high-volume WhatsApp traffic:
+
+```
+tools (6 defs) + system prompt        ← one cache breakpoint on the last
+                                         system block; identical across every
+                                         conversation, stays warm continuously
+        ↓
+conversation history (all prior turns) ← one cache breakpoint on the
+                                          second-to-last message, refreshed
+                                          on every request
+        ↓
+newest user turn + Claude's new reply  ← always uncached (unique per request)
+```
+
+- **TTL:** 5-minute ephemeral cache (`cache_control: { type: 'ephemeral' }`), the default. The static tools+system prefix gets reused continuously by any traffic; the history breakpoint benefits bursty back-and-forth within a session. Not tied to the 8h session timeout — the cache TTL and the session timeout are independent.
+- **Thinking is explicitly disabled** (`thinking: { type: 'disabled' }`), not just omitted — this protects against a silent cost regression if `ANTHROPIC_MODEL` is ever overridden to a model where adaptive thinking is on by default.
+- **Token usage is logged per call** (`input`, `output`, `cache_creation_input_tokens`, `cache_read_input_tokens`) for cost visibility, without phone numbers or message content.
 
 ### Search Strategy (enforced in system prompt)
 
@@ -317,9 +640,9 @@ Claude receives results and presents top matches to client
 ```
 Internet
     ↓
-[1] Meta signature validation (WebhookGuard)
+[1] Meta signature validation (WebhookSignatureGuard)
     ↓
-[2] Rate limiting per phone (RateLimitGuard)
+[2] Rate limiting per phone (RateLimitService, called from WebhookService)
     ↓
 [3] Input sanitization
     ↓
@@ -339,8 +662,10 @@ Each layer is independent. A failure at one layer does not bypass the others.
 | Client | Auth Method | DB Access |
 |--------|------------|-----------|
 | WhatsApp clients | None (public webhook) | Via NestJS service role — agency_id enforced in code |
-| Admin panel users | Supabase Auth (email/password) | Via anon key — RLS enforced in DB |
+| Admin panel users | Supabase Auth (email/password), access token sent as `Authorization: Bearer` to the NestJS API | Via NestJS service role — `SupabaseAuthGuard` verifies the token (`supabase.auth.getUser`) and resolves `agency_id` from `agency_users`; every admin route is `agency_id`-scoped in code, same model as the WhatsApp path. RLS policies remain in place as defense in depth, not the primary access path. |
 | NestJS backend | Service role key | Bypasses RLS — agency_id enforced in every query |
+
+**Onboarding exception:** `GET /agencies/me` and `POST /agencies` are the only admin routes that do **not** require a linked agency — a user with none yet must still be able to check for one and create it. They sit behind `SupabaseUserGuard` (verifies the token, attaches `{ userId }`, never queries `agency_users`) instead of `SupabaseAuthGuard`, and use `@CurrentUser()` instead of `@CurrentAgency()`. `POST /agencies` calls the `create_agency_with_owner` Postgres RPC, which inserts `agencies` + `agency_users` in one transaction — a failed link can never leave an orphaned agency row (relevant since `agencies.email` is `UNIQUE`). Every other admin route stays behind `SupabaseAuthGuard`, unchanged.
 
 ---
 
@@ -364,11 +689,11 @@ All checks pass?
   YES → PR can be merged to develop
         ↓
 Merge to develop
-  → Railway auto-deploys api (staging)
+  → Render auto-deploys api (staging)
   → Vercel auto-deploys admin (staging)
         ↓
 Merge develop to main
-  → Railway auto-deploys api (production)
+  → Render auto-deploys api (production)
   → Vercel auto-deploys admin (production)
 ```
 
@@ -376,9 +701,9 @@ Merge develop to main
 
 ## Environment Variables
 
-All secrets are managed via Railway (API) and Vercel (Admin) dashboards. Never in code.
+All secrets are managed via Render (API) and Vercel (Admin) dashboards. Never in code.
 
-### `apps/api` (Railway)
+### `apps/api` (Render)
 ```bash
 ANTHROPIC_API_KEY=          # Claude API
 OPENAI_API_KEY=             # Embeddings
@@ -395,6 +720,10 @@ RESEND_API_KEY=             # Email notifications
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=       # Supabase project URL (public)
 NEXT_PUBLIC_SUPABASE_ANON_KEY=  # Supabase anon key (public, RLS enforced)
+API_URL=                        # apps/api base URL. Server-only (no NEXT_PUBLIC_
+                                 # prefix) — every call happens in Server Components/
+                                 # Server Actions, never the browser, so apps/api
+                                 # needs no CORS config for this.
 ```
 
 ---
@@ -407,8 +736,12 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=  # Supabase anon key (public, RLS enforced)
 | ORM | Supabase JS client (no ORM) | Simple queries, RLS compatibility, no overhead |
 | Rate limit storage | Supabase table | Persists across server restarts |
 | Embedding model | OpenAI text-embedding-3-small | Claude has no embedding model; OpenAI free credits available |
-| AI model | Claude Haiku | Cost-efficient for high-frequency WhatsApp interactions |
-| Conversation history | Full history per request | Better agent context; 50-message limit controls cost |
+| AI model | Claude Sonnet 4.6 | More natural conversational tone than Haiku; cost controlled via prompt caching (see Prompt Caching Strategy) rather than a cheaper model |
+| Conversation history | Full history per request, prompt-cached | Better agent context; caching keeps resending full history cheap; 50-message limit is the remaining hard cost bound |
 | Session timeout | 8 hours | Balances context retention with DB storage |
 | Admin auth | Supabase Auth | Already in stack, email/password out of the box |
+| Admin frontend session handling | `@supabase/ssr` (`createBrowserClient`/`createServerClient`), `supabase.auth.getUser()` in Server Components | Official current package for Next.js App Router (supersedes deprecated `@supabase/auth-helpers-nextjs`); `getUser()` revalidates against Supabase Auth instead of trusting an unverified session cookie like `getSession()` would |
+| Admin UI components | shadcn/ui (Radix primitives, Tailwind v4) | Already the project's chosen component approach; components are copied into the repo (`components/ui/`), not an opaque dependency |
 | Notifications | Resend email | Simpler than WhatsApp-to-advisor; free tier sufficient |
+| Dashboard metrics | Aggregated in Node (`StatsService`) over two narrow `agency_id`-scoped selects, not a Postgres RPC | One agency's catalogue and lead list fit comfortably in memory at this scale, so it costs one round trip each and stays unit-testable without a database. No migration, no type regeneration, no `GRANT` to manage. If an agency outgrows it, only the two private fetches change — the `GET /stats` response shape is the contract. |
+| Property list filtering | Server-side, via `GET /properties` query params | The panel paginates, so client-side filtering would only ever filter the current page. `total` is the post-filter count, so pagination stays correct. Free text goes through `.or`, so the term is sanitized with the same helper that guards the agent's zone filter. |

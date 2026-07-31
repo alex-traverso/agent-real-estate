@@ -14,6 +14,7 @@ import { config } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import type { Database, TablesInsert } from 'types';
+import { buildPropertyEmbeddingInput } from '../src/embeddings/embedding-input';
 
 config({ path: resolve(__dirname, '../.env') });
 
@@ -46,26 +47,12 @@ const DEMO_AGENCY: TablesInsert<'agencies'> = {
   name: 'Inmobiliaria Demo',
   email: 'demo@agentrealestate.test',
   phone: '+541112345678',
+  // Links the demo agency to the WhatsApp business number so the backend can
+  // resolve inbound messages (metadata.phone_number_id) to this tenant.
+  whatsapp_phone_number_id: process.env.META_PHONE_NUMBER_ID ?? null,
 };
 
 type SeedProperty = Omit<TablesInsert<'properties'>, 'agency_id' | 'embedding'>;
-
-// Same shape of text a future `EmbeddingsService` should build for an
-// incoming client query, so cosine similarity between query and property
-// embeddings is comparable. Keep this template in sync if it changes.
-function buildEmbeddingInput(property: SeedProperty): string {
-  const parts = [
-    property.title,
-    property.description ?? '',
-    `Zona: ${property.zone}.`,
-    `Tipo: ${property.type}.`,
-    `Operación: ${property.operation}.`,
-    property.rooms ? `${property.rooms} ambientes.` : '',
-    property.bedrooms ? `${property.bedrooms} dormitorios.` : '',
-    property.parking ? 'Con cochera.' : '',
-  ];
-  return parts.filter(Boolean).join(' ');
-}
 
 const SEED_PROPERTIES: SeedProperty[] = [
   {
@@ -322,7 +309,7 @@ async function main() {
   );
   const rows: TablesInsert<'properties'>[] = [];
   for (const property of SEED_PROPERTIES) {
-    const embedding = await embed(buildEmbeddingInput(property));
+    const embedding = await embed(buildPropertyEmbeddingInput(property));
     rows.push({ ...property, agency_id: agency.id, embedding });
     console.log(`[seed]   ✓ ${property.title}`);
   }

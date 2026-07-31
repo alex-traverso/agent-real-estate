@@ -64,6 +64,7 @@ export type Database = {
           id: string
           name: string
           phone: string | null
+          whatsapp_phone_number_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -71,6 +72,7 @@ export type Database = {
           id?: string
           name: string
           phone?: string | null
+          whatsapp_phone_number_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -78,6 +80,7 @@ export type Database = {
           id?: string
           name?: string
           phone?: string | null
+          whatsapp_phone_number_id?: string | null
         }
         Relationships: []
       }
@@ -120,6 +123,10 @@ export type Database = {
           messages: Json
           phone: string
           status: Database["public"]["Enums"]["conversation_status"] | null
+          total_cache_creation_tokens: number
+          total_cache_read_tokens: number
+          total_input_tokens: number
+          total_output_tokens: number
           updated_at: string | null
         }
         Insert: {
@@ -132,6 +139,10 @@ export type Database = {
           messages?: Json
           phone: string
           status?: Database["public"]["Enums"]["conversation_status"] | null
+          total_cache_creation_tokens?: number
+          total_cache_read_tokens?: number
+          total_input_tokens?: number
+          total_output_tokens?: number
           updated_at?: string | null
         }
         Update: {
@@ -144,6 +155,10 @@ export type Database = {
           messages?: Json
           phone?: string
           status?: Database["public"]["Enums"]["conversation_status"] | null
+          total_cache_creation_tokens?: number
+          total_cache_read_tokens?: number
+          total_input_tokens?: number
+          total_output_tokens?: number
           updated_at?: string | null
         }
         Relationships: [
@@ -221,6 +236,34 @@ export type Database = {
             foreignKeyName: "leads_property_id_fkey"
             columns: ["property_id"]
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      processed_messages: {
+        Row: {
+          agency_id: string
+          created_at: string | null
+          id: string
+          message_id: string
+        }
+        Insert: {
+          agency_id: string
+          created_at?: string | null
+          id?: string
+          message_id: string
+        }
+        Update: {
+          agency_id?: string
+          created_at?: string | null
+          id?: string
+          message_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processed_messages_agency_id_fkey"
+            columns: ["agency_id"]
+            referencedRelation: "agencies"
             referencedColumns: ["id"]
           },
         ]
@@ -340,6 +383,28 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_agency_with_owner: {
+        Args: {
+          p_email: string
+          p_name: string
+          p_phone?: string
+          p_user_id: string
+        }
+        Returns: {
+          created_at: string | null
+          email: string
+          id: string
+          name: string
+          phone: string | null
+          whatsapp_phone_number_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "agencies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       search_properties_semantic: {
         Args: {
           agency_id_filter: string

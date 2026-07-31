@@ -1,16 +1,110 @@
 import { WebhookService } from './webhook.service';
-import { PLACEHOLDER_REPLY_ES } from './webhook.constants';
+import {
+  FALLBACK_REPLY_ES,
+  MESSAGE_CAP_REPLY_ES,
+  RATE_LIMIT_REPLY_ES,
+} from './webhook.constants';
+import { MAX_MESSAGES } from '../conversation/conversation.constants';
 import type { WhatsAppService } from '../messaging/whatsapp.service';
-import type { WhatsAppWebhookPayload } from './types/whatsapp-webhook.types';
+import type { AgencyService } from '../agency/agency.service';
+import type { ConversationService } from '../conversation/conversation.service';
+import type { AgentService } from '../agent/agent.service';
+import type { RateLimitService } from '../rate-limit/rate-limit.service';
+import type { EscalationService } from '../escalation/escalation.service';
+import type { IdempotencyService } from '../idempotency/idempotency.service';
+import type {
+  WhatsAppContact,
+  WhatsAppWebhookPayload,
+} from './types/whatsapp-webhook.types';
 
-function createService(
-  sendText: jest.Mock = jest.fn().mockResolvedValue('wamid.OUT'),
-) {
-  const whatsapp = { sendText } as unknown as WhatsAppService;
-  return { service: new WebhookService(whatsapp), sendText };
+const AGENT_REPLY = 'Hola, soy Luca. ¿Buscás alquilar o comprar?';
+const SAMPLE_USAGE = {
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheCreationTokens: 3000,
+  cacheReadTokens: 500,
+};
+
+function conversation(messageCount = 0) {
+  return {
+    id: 'conv-1',
+    agency_id: 'agency-1',
+    message_count: messageCount,
+    messages: [],
+  };
 }
 
-function textPayload(body = 'Hola', type = 'text'): WhatsAppWebhookPayload {
+function createService(
+  opts: {
+    agencyId?: string | null;
+    rateLimitAllowed?: boolean;
+    messageCount?: number;
+    escalateFails?: boolean;
+    firstDelivery?: boolean;
+  } = {},
+) {
+  const sendText = jest.fn().mockResolvedValue('wamid.OUT');
+  const resolveIdByPhoneNumberId = jest
+    .fn()
+    .mockResolvedValue(
+      opts.agencyId === undefined ? 'agency-1' : opts.agencyId,
+    );
+  const CONVERSATION = conversation(opts.messageCount ?? 0);
+  const getOrCreateActive = jest.fn().mockResolvedValue(CONVERSATION);
+  const appendMessages = jest.fn().mockResolvedValue(CONVERSATION);
+  const markEscalated = jest.fn().mockResolvedValue(undefined);
+  const processMessage = jest
+    .fn()
+    .mockResolvedValue({ reply: AGENT_REPLY, usage: SAMPLE_USAGE });
+  const checkAndIncrement = jest
+    .fn()
+    .mockResolvedValue(opts.rateLimitAllowed ?? true);
+  const escalate = opts.escalateFails
+    ? jest.fn().mockRejectedValue(new Error('resend down'))
+    : jest.fn().mockResolvedValue({ id: 'lead-1' });
+  const checkAndMark = jest.fn().mockResolvedValue(opts.firstDelivery ?? true);
+
+  const whatsapp = { sendText } as unknown as WhatsAppService;
+  const agencyService = {
+    resolveIdByPhoneNumberId,
+  } as unknown as AgencyService;
+  const conversationService = {
+    getOrCreateActive,
+    appendMessages,
+    markEscalated,
+  } as unknown as ConversationService;
+  const agent = { processMessage } as unknown as AgentService;
+  const rateLimit = { checkAndIncrement } as unknown as RateLimitService;
+  const escalation = { escalate } as unknown as EscalationService;
+  const idempotency = { checkAndMark } as unknown as IdempotencyService;
+
+  return {
+    service: new WebhookService(
+      whatsapp,
+      agencyService,
+      conversationService,
+      agent,
+      rateLimit,
+      escalation,
+      idempotency,
+    ),
+    sendText,
+    resolveIdByPhoneNumberId,
+    getOrCreateActive,
+    appendMessages,
+    markEscalated,
+    processMessage,
+    checkAndIncrement,
+    escalate,
+    checkAndMark,
+  };
+}
+
+function textPayload(
+  body = 'Hola',
+  type = 'text',
+  contacts?: WhatsAppContact[],
+): WhatsAppWebhookPayload {
   return {
     object: 'whatsapp_business_account',
     entry: [
@@ -25,6 +119,7 @@ function textPayload(body = 'Hola', type = 'text'): WhatsAppWebhookPayload {
                 display_phone_number: '15550001111',
                 phone_number_id: 'pnid-123',
               },
+              ...(contacts ? { contacts } : {}),
               messages: [
                 {
                   from: '5491122223333',
@@ -73,52 +168,294 @@ const statusPayload: WhatsAppWebhookPayload = {
 
 describe('WebhookService', () => {
   describe('processInbound', () => {
-    it('replies to a text message with the placeholder', async () => {
-      const { service, sendText } = createService();
+    it('resolves tenant, persists inbound + reply, and sends the agent reply', async () => {
+      const {
+        service,
+        sendText,
+        resolveIdByPhoneNumberId,
+        getOrCreateActive,
+        appendMessages,
+        processMessage,
+        checkAndMark,
+      } = createService();
+
       await service.processInbound(textPayload());
 
-      expect(sendText).toHaveBeenCalledTimes(1);
-      expect(sendText).toHaveBeenCalledWith(
+      expect(resolveIdByPhoneNumberId).toHaveBeenCalledWith('pnid-123');
+      expect(checkAndMark).toHaveBeenCalledWith('agency-1', 'wamid.ABC');
+      expect(getOrCreateActive).toHaveBeenCalledWith(
+        'agency-1',
         '5491122223333',
-        PLACEHOLDER_REPLY_ES,
+      );
+      expect(processMessage).toHaveBeenCalledWith({
+        agencyId: 'agency-1',
+        conversationId: 'conv-1',
+        clientPhone: '5491122223333',
+        history: [],
+        userText: 'Hola',
+      });
+      expect(sendText).toHaveBeenCalledWith('5491122223333', AGENT_REPLY);
+
+      expect(appendMessages).toHaveBeenCalledTimes(2);
+      expect(appendMessages).toHaveBeenNthCalledWith(1, expect.anything(), [
+        expect.objectContaining({
+          role: 'user',
+          content: 'Hola',
+          whatsapp_message_id: 'wamid.ABC',
+        }),
+      ]);
+      // The assistant turn is persisted together with the tokens it cost.
+      expect(appendMessages).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        [expect.objectContaining({ role: 'assistant', content: AGENT_REPLY })],
+        SAMPLE_USAGE,
+      );
+      // The inbound user turn carries no usage.
+      expect(appendMessages.mock.calls[0]).toHaveLength(2);
+    });
+
+    it('sends the generic fallback and persists it (with no usage) when the agent fails', async () => {
+      const { service, sendText, appendMessages, processMessage } =
+        createService();
+      processMessage.mockRejectedValueOnce(new Error('anthropic down'));
+
+      await service.processInbound(textPayload());
+
+      expect(sendText).toHaveBeenCalledWith('5491122223333', FALLBACK_REPLY_ES);
+      // Fallback turn never reached Claude, so no token totals are recorded.
+      expect(appendMessages).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        [
+          expect.objectContaining({
+            role: 'assistant',
+            content: FALLBACK_REPLY_ES,
+          }),
+        ],
+        undefined,
       );
     });
 
-    it('does not reply to a status-only payload (no reply storm)', async () => {
-      const { service, sendText } = createService();
-      await service.processInbound(statusPayload);
+    it('does not send or persist when the tenant cannot be resolved', async () => {
+      const { service, sendText, getOrCreateActive, appendMessages } =
+        createService({ agencyId: null });
+
+      await service.processInbound(textPayload());
+
+      expect(getOrCreateActive).not.toHaveBeenCalled();
+      expect(appendMessages).not.toHaveBeenCalled();
       expect(sendText).not.toHaveBeenCalled();
     });
 
-    it('does not reply to a non-text message', async () => {
-      const { service, sendText } = createService();
+    it('sends the rate-limit reply and never reaches the agent when the phone is over its limit', async () => {
+      const {
+        service,
+        sendText,
+        checkAndIncrement,
+        getOrCreateActive,
+        appendMessages,
+        processMessage,
+      } = createService({ rateLimitAllowed: false });
+
+      await service.processInbound(textPayload());
+
+      expect(checkAndIncrement).toHaveBeenCalledWith(
+        'agency-1',
+        '5491122223333',
+      );
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(
+        '5491122223333',
+        RATE_LIMIT_REPLY_ES,
+      );
+      expect(getOrCreateActive).not.toHaveBeenCalled();
+      expect(appendMessages).not.toHaveBeenCalled();
+      expect(processMessage).not.toHaveBeenCalled();
+    });
+
+    it('skips silently on a Meta redelivery (duplicate message.id), with no reply and no side effects', async () => {
+      const {
+        service,
+        sendText,
+        checkAndIncrement,
+        getOrCreateActive,
+        appendMessages,
+        processMessage,
+      } = createService({ firstDelivery: false });
+
+      await service.processInbound(textPayload());
+
+      expect(sendText).not.toHaveBeenCalled();
+      expect(checkAndIncrement).not.toHaveBeenCalled();
+      expect(getOrCreateActive).not.toHaveBeenCalled();
+      expect(appendMessages).not.toHaveBeenCalled();
+      expect(processMessage).not.toHaveBeenCalled();
+    });
+
+    it('checks idempotency before the rate limit (dedup does not consume the rate-limit budget)', async () => {
+      const { service, checkAndMark, checkAndIncrement } = createService();
+
+      await service.processInbound(textPayload());
+
+      const markOrder = checkAndMark.mock.invocationCallOrder[0];
+      const rateOrder = checkAndIncrement.mock.invocationCallOrder[0];
+      expect(markOrder).toBeLessThan(rateOrder);
+    });
+
+    it('passes the WhatsApp contact profile name to the agent as contactName', async () => {
+      const { service, processMessage } = createService();
+
+      await service.processInbound(
+        textPayload('Hola', 'text', [
+          { profile: { name: 'Alex T.' }, wa_id: '5491122223333' },
+        ]),
+      );
+
+      expect(processMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ contactName: 'Alex T.' }),
+      );
+    });
+
+    it('does not leak a contact name belonging to a different wa_id', async () => {
+      const { service, processMessage } = createService();
+
+      await service.processInbound(
+        textPayload('Hola', 'text', [
+          { profile: { name: 'Otra Persona' }, wa_id: '5490000000000' },
+        ]),
+      );
+
+      expect(processMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ contactName: undefined }),
+      );
+    });
+
+    it('sanitizes the contact profile name before using it', async () => {
+      const { service, processMessage } = createService();
+
+      await service.processInbound(
+        textPayload('Hola', 'text', [
+          { profile: { name: '👍' }, wa_id: '5491122223333' },
+        ]),
+      );
+
+      expect(processMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ contactName: undefined }),
+      );
+    });
+
+    it('uses the WhatsApp contact name as the lead name when escalating at the message cap', async () => {
+      const { service, escalate } = createService({
+        messageCount: MAX_MESSAGES,
+      });
+
+      await service.processInbound(
+        textPayload('Hola', 'text', [
+          { profile: { name: 'Alex T.' }, wa_id: '5491122223333' },
+        ]),
+      );
+
+      expect(escalate).toHaveBeenCalledWith(
+        'agency-1',
+        expect.objectContaining({ name: 'Alex T.' }),
+        'conv-1',
+      );
+    });
+
+    it('escalates and hands off when the conversation is at the message cap, without calling the agent', async () => {
+      const {
+        service,
+        sendText,
+        escalate,
+        markEscalated,
+        appendMessages,
+        processMessage,
+      } = createService({ messageCount: MAX_MESSAGES });
+
+      await service.processInbound(textPayload());
+
+      expect(escalate).toHaveBeenCalledWith(
+        'agency-1',
+        expect.objectContaining({ phone: '5491122223333' }),
+        'conv-1',
+      );
+      expect(markEscalated).toHaveBeenCalledWith('conv-1', 'agency-1');
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(
+        '5491122223333',
+        MESSAGE_CAP_REPLY_ES,
+      );
+      expect(appendMessages).not.toHaveBeenCalled();
+      expect(processMessage).not.toHaveBeenCalled();
+    });
+
+    it('escalates past the cap too (>= not just ==)', async () => {
+      const { service, sendText } = createService({
+        messageCount: MAX_MESSAGES + 5,
+      });
+
+      await service.processInbound(textPayload());
+
+      expect(sendText).toHaveBeenCalledWith(
+        '5491122223333',
+        MESSAGE_CAP_REPLY_ES,
+      );
+    });
+
+    it('sends the generic fallback and does not mark escalated when escalating at the cap fails', async () => {
+      const { service, sendText, markEscalated } = createService({
+        messageCount: MAX_MESSAGES,
+        escalateFails: true,
+      });
+
+      await service.processInbound(textPayload());
+
+      expect(sendText).toHaveBeenCalledWith('5491122223333', FALLBACK_REPLY_ES);
+      expect(markEscalated).not.toHaveBeenCalled();
+    });
+
+    it('stays on the normal reply flow when under the message cap', async () => {
+      const { service, sendText, processMessage } = createService({
+        messageCount: MAX_MESSAGES - 1,
+      });
+
+      await service.processInbound(textPayload());
+
+      expect(processMessage).toHaveBeenCalled();
+      expect(sendText).toHaveBeenCalledWith('5491122223333', AGENT_REPLY);
+    });
+
+    it('ignores status-only payloads (no reply storm)', async () => {
+      const { service, sendText, resolveIdByPhoneNumberId } = createService();
+      await service.processInbound(statusPayload);
+      expect(resolveIdByPhoneNumberId).not.toHaveBeenCalled();
+      expect(sendText).not.toHaveBeenCalled();
+    });
+
+    it('ignores non-text messages', async () => {
+      const { service, sendText, getOrCreateActive } = createService();
       await service.processInbound(textPayload('', 'image'));
+      expect(getOrCreateActive).not.toHaveBeenCalled();
       expect(sendText).not.toHaveBeenCalled();
     });
 
     it('does not throw on a malformed payload', async () => {
-      const { service, sendText } = createService();
+      const { service } = createService();
       await expect(
         service.processInbound({} as WhatsAppWebhookPayload),
       ).resolves.toBeUndefined();
-      expect(sendText).not.toHaveBeenCalled();
     });
   });
 
   describe('handleInbound (fire-and-forget)', () => {
-    it('returns void synchronously without throwing', () => {
-      const { service } = createService();
-      expect(service.handleInbound(textPayload())).toBeUndefined();
-    });
-
-    it('swallows send failures without throwing', async () => {
-      const sendText = jest.fn().mockRejectedValue(new Error('Meta down'));
-      const { service } = createService(sendText);
+    it('swallows downstream failures without throwing', async () => {
+      const { service, getOrCreateActive } = createService();
+      getOrCreateActive.mockRejectedValueOnce(new Error('db down'));
 
       expect(() => service.handleInbound(textPayload())).not.toThrow();
-      // Let the fire-and-forget promise (and its .catch) settle.
       await new Promise((resolve) => setImmediate(resolve));
-      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(getOrCreateActive).toHaveBeenCalledTimes(1);
     });
   });
 });

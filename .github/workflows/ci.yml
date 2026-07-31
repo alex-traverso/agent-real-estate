@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
+      - name: Build shared types
+        run: yarn workspace types build
+
       - name: Typecheck
         run: yarn workspace api tsc --noEmit
 
@@ -38,6 +41,12 @@ jobs:
 
       - name: Build
         run: yarn workspace api build
+
+      - name: Test (unit + coverage thresholds)
+        run: yarn workspace api test:cov
+
+      - name: Test (e2e)
+        run: yarn workspace api test:e2e
 
   check-admin:
     name: Check Admin
@@ -56,6 +65,9 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --immutable
+
+      - name: Build shared types
+        run: yarn workspace types build
 
       - name: Typecheck
         run: yarn workspace admin tsc --noEmit
