@@ -52,6 +52,7 @@ export function TopZonesChart({ data }: TopZonesChartProps) {
           tickLine={false}
           axisLine={false}
           width={88}
+          interval={0}
           tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
         />
         <Tooltip

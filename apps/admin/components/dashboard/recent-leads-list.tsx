@@ -23,15 +23,15 @@ export function RecentLeadsList({ leads }: RecentLeadsListProps) {
             <RevealItem key={lead.id} as="li">
               <Link
                 href={`/leads/${lead.id}`}
-                className="flex items-center justify-between gap-4 rounded-lg px-2 py-3 text-sm transition-colors hover:bg-muted/50"
+                className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 rounded-lg px-2 py-3 text-sm transition-colors hover:bg-muted/50"
               >
-                <span className="font-medium text-foreground">
+                <span className="min-w-0 truncate font-medium text-foreground">
                   {lead.name || "Sin nombre"}
                 </span>
-                <span className="text-muted-foreground">
+                <span className="text-center text-muted-foreground">
                   {lead.status ? LEAD_STATUS_LABELS[lead.status] : "—"}
                 </span>
-                <span className="type-data text-muted-foreground">
+                <span className="type-data min-w-0 truncate text-right text-muted-foreground">
                   {formatDate(lead.created_at)}
                 </span>
               </Link>

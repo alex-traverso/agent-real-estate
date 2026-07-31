@@ -14,7 +14,7 @@ export function ChartPanel({ title, children }: ChartPanelProps) {
   return (
     <div className="flex flex-col gap-3 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <span className="type-eyebrow">{title}</span>
-      <div className="h-48 w-full">{children}</div>
+      <div className="h-64 w-full">{children}</div>
     </div>
   );
 }
