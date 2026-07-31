@@ -15,12 +15,12 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown } from "lucide-react";
 import type { Tables } from "types";
 import {
   Table,
-  TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Stagger, RevealItem } from "@/components/motion/reveal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -243,17 +243,21 @@ export function PropertiesTable({ properties }: PropertiesTableProps) {
               </TableRow>
             ))}
           </TableHeader>
-          <TableBody>
+          <Stagger as="tbody" className="[&_tr:last-child]:border-0">
             {table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id}>
+              <RevealItem
+                key={row.id}
+                as="tr"
+                className="border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted"
+              >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </TableCell>
                 ))}
-              </TableRow>
+              </RevealItem>
             ))}
-          </TableBody>
+          </Stagger>
         </Table>
       </div>
     </div>

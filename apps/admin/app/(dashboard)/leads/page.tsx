@@ -3,19 +3,24 @@ import type { Enums, Tables } from "types";
 import { apiGet } from "@/lib/api/client";
 import {
   Table,
-  TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/shell/page-header";
+import { Stagger, RevealItem } from "@/components/motion/reveal";
 import { LeadsTabs } from "@/components/leads/leads-tabs";
 import { LeadStatusMenu } from "@/components/leads/lead-status-menu";
 import { DataPagination } from "@/components/ui/data-pagination";
 import { OPERATION_TYPE_LABELS } from "@/lib/property-labels";
 import { LEAD_STATUS_ORDER } from "@/lib/lead-labels";
-import { EMPTY_VALUE, formatBudget, formatDate, formatPhone } from "@/lib/format";
+import {
+  EMPTY_VALUE,
+  formatBudget,
+  formatDate,
+  formatPhone,
+} from "@/lib/format";
 import type { AgencyStats } from "@/app/(dashboard)/stats.types";
 
 type LeadStatus = Enums<"lead_status">;
@@ -63,7 +68,7 @@ export default async function LeadsPage({
               <TableHead>Fecha</TableHead>
             </TableRow>
           </TableHeader>
-          <TableBody>
+          <Stagger as="tbody" className="[&_tr:last-child]:border-0">
             {leads.length === 0 && (
               <TableRow>
                 <TableCell
@@ -75,9 +80,16 @@ export default async function LeadsPage({
               </TableRow>
             )}
             {leads.map((lead) => (
-              <TableRow key={lead.id}>
+              <RevealItem
+                key={lead.id}
+                as="tr"
+                className="border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted"
+              >
                 <TableCell>
-                  <Link href={`/leads/${lead.id}`} className="font-medium hover:underline">
+                  <Link
+                    href={`/leads/${lead.id}`}
+                    className="font-medium hover:underline"
+                  >
                     {lead.name || "Sin nombre"}
                   </Link>
                 </TableCell>
@@ -92,18 +104,27 @@ export default async function LeadsPage({
                 <TableCell>{lead.preferred_zone || EMPTY_VALUE}</TableCell>
                 <TableCell>
                   <span className="type-data">
-                    {formatBudget(lead.budget_min, lead.budget_max, lead.currency)}
+                    {formatBudget(
+                      lead.budget_min,
+                      lead.budget_max,
+                      lead.currency,
+                    )}
                   </span>
                 </TableCell>
                 <TableCell>
-                  <LeadStatusMenu leadId={lead.id} initialStatus={lead.status ?? "new"} />
+                  <LeadStatusMenu
+                    leadId={lead.id}
+                    initialStatus={lead.status ?? "new"}
+                  />
                 </TableCell>
                 <TableCell>
-                  <span className="type-data">{formatDate(lead.created_at)}</span>
+                  <span className="type-data">
+                    {formatDate(lead.created_at)}
+                  </span>
                 </TableCell>
-              </TableRow>
+              </RevealItem>
             ))}
-          </TableBody>
+          </Stagger>
         </Table>
       </div>
 
