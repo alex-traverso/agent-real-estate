@@ -726,6 +726,15 @@ API_URL=                        # apps/api base URL. Server-only (no NEXT_PUBLIC
                                  # needs no CORS config for this.
 ```
 
+### Supabase Auth dashboard config (not an env var)
+The production Supabase project needs its **Authentication → URL Configuration**
+set by hand in the Supabase dashboard — this isn't code or an env var, so it's
+easy to miss: Site URL must be the Vercel production domain, and Redirect URLs
+must include `<domain>/reset-password` (matches the `redirectTo` built
+dynamically from `window.location.origin` in
+`apps/admin/app/(auth)/forgot-password/page.tsx`). Without this, password reset
+emails fail in production even though the code needs no change.
+
 ---
 
 ## Key Technical Decisions

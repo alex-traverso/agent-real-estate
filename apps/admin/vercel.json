@@ -1,0 +1,3 @@
+{
+  "buildCommand": "cd ../.. && yarn workspace types build && yarn workspace admin build"
+}
