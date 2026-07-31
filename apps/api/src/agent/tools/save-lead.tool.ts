@@ -49,9 +49,20 @@ export const LEAD_FIELDS_SCHEMA: Record<string, unknown> = {
 export const saveLeadTool: Anthropic.Tool = {
   name: TOOL_NAMES.saveLead,
   description:
-    "Save a qualified lead once you understand what the client needs. The client's phone number is captured automatically — never ask for it.",
+    "Save a qualified lead once you understand what the client needs and have asked for their full name. The client's phone number is captured automatically — never ask for it. If the client has not given their name yet, ask for it first instead of calling this tool.",
   input_schema: {
     type: 'object',
-    properties: { ...LEAD_FIELDS_SCHEMA },
+    properties: {
+      ...LEAD_FIELDS_SCHEMA,
+      name: {
+        type: 'string',
+        description:
+          "The client's full name exactly as they gave it in the conversation. Required — never invent or guess it.",
+      },
+    },
+    // Only `save_lead` requires a name (not `LEAD_FIELDS_SCHEMA` itself, which
+    // `escalate_to_advisor` also uses and where a name must stay optional —
+    // escalation must still work when the client refuses to give one).
+    required: ['name'],
   },
 };

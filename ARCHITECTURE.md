@@ -149,7 +149,12 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 > agent failure a generic Spanish fallback is sent — the internal error is
 > never surfaced to the client. History is stored
 > in `conversations.messages` as Claude-shaped `{ role, content }` (+ timestamp,
-> whatsapp_message_id).
+> whatsapp_message_id). `WebhookService.resolveContactName` also reads the
+> WhatsApp profile display name from `value.contacts` (matched strictly by
+> `wa_id`, sanitized) and threads it through as `contactName` — untrusted,
+> client-chosen data used only as a silent fallback lead name for
+> `escalate_to_advisor`, never shown to the client and never a substitute for
+> Luca asking directly (see `save_lead` below).
 >
 > `AgentService` runs the Claude (`claude-sonnet-4-6`) tool-calling loop with a
 > versioned Spanish system prompt (`agent/prompts/system.prompt.ts`) and six
@@ -161,7 +166,12 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 > escalation composes `LeadsService` + `AgencyService.getContactEmail` +
 > `NotificationsService` (Resend, non-blocking). Every path is scoped by
 > `agency_id`, the system prompt never contains client text, and the lead
-> `phone` is taken from the conversation, never from the model. The request to
+> `phone` is taken from the conversation, never from the model. `save_lead`'s
+> tool schema requires `name`: if the client hasn't given one, `AgentService`
+> returns a soft (non-`is_error`) tool_result telling Claude to ask for it and
+> retry, rather than persisting a nameless lead — `escalate_to_advisor` keeps
+> `name` optional (falling back to `contactName`) so a client who refuses to
+> give their name is still handed off. The request to
 > Claude uses prompt caching (see "Prompt Caching Strategy" below) and
 > disables thinking explicitly, since Luca's replies are short and
 > conversational. Both admin-facing controllers (`PropertiesController`,
@@ -539,8 +549,8 @@ Return final text to WebhookService
 | `search_properties_by_filters` | operation, zone, rooms, max_price, currency, type | Property[] |
 | `search_properties_semantic` | query_text, operation, match_count | Property[] with similarity score |
 | `search_property_by_address` | address, zone | Property or null |
-| `save_lead` | name, phone, operation_type, zone, budget, rooms, property_id, notes | Lead |
-| `escalate_to_advisor` | phone, reason, conversation_summary | void (sends email) |
+| `save_lead` | **name (required)**, phone, operation_type, zone, budget, rooms, property_id, notes | Lead |
+| `escalate_to_advisor` | name (optional — falls back to the WhatsApp contact profile name), phone, reason, conversation_summary | void (sends email) |
 
 ### Prompt Caching Strategy
 
