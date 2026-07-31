@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: agent-real-estate-api
+    runtime: node
+    rootDir: apps/api
+    buildCommand: cd ../.. && yarn workspace types build && yarn workspace api build
+    startCommand: yarn workspace api start:prod
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_VERIFY_TOKEN
+        sync: false
+      - key: META_API_TOKEN
+        sync: false
+      - key: META_PHONE_NUMBER_ID
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: NOTIFICATIONS_FROM_EMAIL
+        sync: false
