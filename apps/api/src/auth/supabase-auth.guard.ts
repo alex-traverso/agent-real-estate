@@ -5,12 +5,10 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { SupabaseService } from '../common/supabase/supabase.service';
+import { verifySupabaseToken } from './supabase-token.util';
 import type { AuthenticatedRequest } from './types/authenticated-request.type';
-
-const BEARER_PREFIX = 'Bearer ';
 
 /**
  * Authenticates admin panel requests: verifies the Supabase Auth access token
@@ -19,6 +17,10 @@ const BEARER_PREFIX = 'Bearer ';
  * enforce agency_id without re-deriving it. This is the single security
  * boundary for every admin-facing route (CLAUDE.md: agency_id must never be
  * derived from user input).
+ *
+ * A user with no agency_users row is rejected here — that's the onboarding
+ * case: SupabaseUserGuard is the variant that tolerates a missing agency, used
+ * only by the agency-creation endpoint.
  */
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
@@ -28,57 +30,29 @@ export class SupabaseAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-
-    const token = this.extractToken(request);
-    if (!token) {
-      this.logger.warn(
-        '[SupabaseAuthGuard] Rejected request | reason: missing or malformed Authorization header',
-      );
-      throw new UnauthorizedException();
-    }
-
-    const {
-      data: { user },
-      error: authError,
-    } = await this.supabase.client.auth.getUser(token);
-
-    if (authError || !user) {
-      this.logger.warn(
-        '[SupabaseAuthGuard] Rejected request | reason: invalid or expired token',
-      );
-      throw new UnauthorizedException();
-    }
+    const userId = await verifySupabaseToken(request, this.supabase);
 
     const { data: agencyUser, error: dbError } = await this.supabase.client
       .from('agency_users')
       .select('agency_id')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .maybeSingle();
 
     if (dbError) {
       this.logger.error(
-        `[SupabaseAuthGuard] Failed to resolve agency | userId: ${user.id} | error: ${dbError.message}`,
+        `[SupabaseAuthGuard] Failed to resolve agency | userId: ${userId} | error: ${dbError.message}`,
       );
       throw new InternalServerErrorException();
     }
 
     if (!agencyUser) {
       this.logger.warn(
-        `[SupabaseAuthGuard] Rejected request | reason: user has no linked agency | userId: ${user.id}`,
+        `[SupabaseAuthGuard] Rejected request | reason: user has no linked agency | userId: ${userId}`,
       );
       throw new ForbiddenException();
     }
 
-    request.auth = { userId: user.id, agencyId: agencyUser.agency_id };
+    request.auth = { userId, agencyId: agencyUser.agency_id };
     return true;
-  }
-
-  private extractToken(request: AuthenticatedRequest): string | null {
-    const header = request.headers.authorization;
-    if (typeof header !== 'string' || !header.startsWith(BEARER_PREFIX)) {
-      return null;
-    }
-    const token = header.slice(BEARER_PREFIX.length).trim();
-    return token.length > 0 ? token : null;
   }
 }

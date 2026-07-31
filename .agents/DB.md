@@ -65,9 +65,52 @@ CREATE TABLE agency_users (
   agency_id UUID NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE (agency_id, user_id)
+  UNIQUE (agency_id, user_id),
+  UNIQUE (user_id) -- added in 20260731120000_add_agency_onboarding: one user
+                    -- maps to at most one agency (SupabaseAuthGuard's
+                    -- .maybeSingle() by user_id already assumed this)
 );
 ```
+
+### Agency onboarding
+
+`20260731120000_add_agency_onboarding` + `20260731121500_fix_agency_onboarding_function_signature` add `create_agency_with_owner`, a `plpgsql` RPC that inserts `agencies` + `agency_users` in one transaction — needed because `agencies.email` is `UNIQUE`, so a partial failure (agency created, link failed) would leave an orphaned row blocking every retry with "email already in use".
+
+```sql
+CREATE OR REPLACE FUNCTION create_agency_with_owner(
+  p_name TEXT,
+  p_email TEXT,
+  p_user_id UUID,
+  p_phone TEXT DEFAULT NULL
+)
+RETURNS agencies
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = 'public'
+AS $$
+DECLARE
+  v_agency agencies;
+BEGIN
+  INSERT INTO agencies (name, email, phone)
+  VALUES (p_name, p_email, p_phone)
+  RETURNING * INTO v_agency;
+
+  INSERT INTO agency_users (agency_id, user_id)
+  VALUES (v_agency.id, p_user_id);
+
+  RETURN v_agency;
+END;
+$$;
+```
+
+`SECURITY INVOKER` (the default) is deliberate — the API only ever calls this with the `service_role` client, which already bypasses RLS, so `SECURITY DEFINER`'s elevated privilege isn't needed. `EXECUTE` is revoked from `PUBLIC` and granted only to `service_role`:
+
+```sql
+REVOKE EXECUTE ON FUNCTION create_agency_with_owner(TEXT, TEXT, UUID, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION create_agency_with_owner(TEXT, TEXT, UUID, TEXT) TO service_role;
+```
+
+Parameter order matters here: `p_phone` needs `DEFAULT NULL` to stay optional, and Postgres requires every defaulted parameter to trail every non-defaulted one — so `p_phone` must come after `p_user_id`, not before it.
 
 #### `properties`
 Real estate listings. Includes a `embedding` column for pgvector semantic search.
@@ -366,6 +409,8 @@ WHERE table_schema = 'public' AND grantee IN ('anon','authenticated','service_ro
 GROUP BY grantee, table_name
 ORDER BY table_name, grantee;
 ```
+
+**Function grants work the other way.** Unlike tables, Postgres grants `EXECUTE` on a new function to `PUBLIC` by default — the opposite of the table default. A function that does privileged writes (like `create_agency_with_owner`, which inserts into `agencies`/`agency_users` under `SECURITY INVOKER` as whichever role calls it) must explicitly `REVOKE EXECUTE ... FROM PUBLIC` and `GRANT EXECUTE` only to the roles that should call it, or any Supabase client — including the browser's `anon`/`authenticated` key — could invoke it. `search_properties_semantic` doesn't need this revoke because it's read-only and RLS-safe for any caller; a function that writes does.
 
 ---
 
