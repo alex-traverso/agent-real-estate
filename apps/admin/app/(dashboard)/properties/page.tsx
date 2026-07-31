@@ -1,118 +1,139 @@
 import Link from "next/link";
+import { Building } from "lucide-react";
 import type { Tables } from "types";
 import { apiGet } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { ExcelUploadForm } from "./excel-upload-form";
-import { OPERATION_TYPE_LABELS, PROPERTY_TYPE_LABELS } from "@/lib/property-labels";
+import { PageHeader } from "@/components/shell/page-header";
+import { FilterBar } from "@/components/properties/filter-bar";
+import { PropertiesTable } from "@/components/properties/properties-table";
+import { PropertiesPagination } from "@/components/properties/properties-pagination";
+import { ExcelUploadDialog } from "@/components/properties/excel-upload-dialog";
 
 const PAGE_SIZE = 20;
+
+const SORT_COLUMNS = ["created_at", "price", "title"] as const;
+type SortColumn = (typeof SORT_COLUMNS)[number];
+
+function isSortColumn(value: string | undefined): value is SortColumn {
+  return (SORT_COLUMNS as readonly string[]).includes(value ?? "");
+}
+
+function isSortOrder(value: string | undefined): value is "asc" | "desc" {
+  return value === "asc" || value === "desc";
+}
+
+function isAvailableFilter(value: string | undefined): value is "true" | "false" {
+  return value === "true" || value === "false";
+}
+
+type PropertiesSearchParams = {
+  page?: string;
+  search?: string;
+  zone?: string;
+  operation?: string;
+  type?: string;
+  available?: string;
+  sort?: string;
+  order?: string;
+};
 
 export default async function PropertiesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<PropertiesSearchParams>;
 }) {
-  const { page: pageParam } = await searchParams;
-  const page = Math.max(1, Number(pageParam) || 1);
+  const params = await searchParams;
+  const page = Math.max(1, Number(params.page) || 1);
 
-  const { data: properties, total } = await apiGet<{
-    data: Tables<"properties">[];
-    total: number;
-  }>(`/properties?page=${page}&limit=${PAGE_SIZE}`);
+  const hasActiveFilters = Boolean(
+    params.search ||
+      params.zone ||
+      params.operation ||
+      params.type ||
+      isAvailableFilter(params.available),
+  );
+
+  const query = new URLSearchParams();
+  query.set("page", String(page));
+  query.set("limit", String(PAGE_SIZE));
+  if (params.search) query.set("search", params.search);
+  if (params.zone) query.set("zone", params.zone);
+  if (params.operation) query.set("operation", params.operation);
+  if (params.type) query.set("type", params.type);
+  if (isAvailableFilter(params.available)) query.set("available", params.available);
+  if (isSortColumn(params.sort)) query.set("sort", params.sort);
+  if (isSortOrder(params.order)) query.set("order", params.order);
+
+  const [{ data: properties, total }, zones] = await Promise.all([
+    apiGet<{ data: Tables<"properties">[]; total: number }>(
+      `/properties?${query.toString()}`,
+    ),
+    apiGet<string[]>("/properties/zones"),
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // Totally empty catalog, no filters in play: the PR D dashboard-home empty
+  // state, not the "filters matched nothing" one below.
+  if (total === 0 && !hasActiveFilters) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader eyebrow="Catálogo" title="Propiedades" />
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl bg-card py-24 text-center ring-1 ring-foreground/10">
+          <div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Building className="size-5" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <h2 className="type-subtitle text-foreground">
+              Cargá tu primera propiedad
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Todavía no hay propiedades cargadas — sumá la primera para
+              empezar a armar el catálogo.
+            </p>
+          </div>
+          <Button asChild>
+            <Link href="/properties/new">Cargar propiedad</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="font-heading text-2xl font-medium">Propiedades</h1>
-        <Button asChild>
-          <Link href="/properties/new">Nueva propiedad</Link>
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="Catálogo"
+        title="Propiedades"
+        actions={
+          <>
+            <ExcelUploadDialog />
+            <Button asChild>
+              <Link href="/properties/new">Nueva propiedad</Link>
+            </Button>
+          </>
+        }
+      />
 
-      <ExcelUploadForm />
+      <FilterBar zones={zones} />
 
-      <div className="rounded-xl border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Título</TableHead>
-              <TableHead>Zona</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Operación</TableHead>
-              <TableHead>Precio</TableHead>
-              <TableHead>Estado</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {properties.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  No hay propiedades cargadas todavía.
-                </TableCell>
-              </TableRow>
-            )}
-            {properties.map((property) => (
-              <TableRow key={property.id}>
-                <TableCell>
-                  <Link
-                    href={`/properties/${property.id}`}
-                    className="hover:underline"
-                  >
-                    {property.title}
-                  </Link>
-                </TableCell>
-                <TableCell>{property.zone}</TableCell>
-                <TableCell>{PROPERTY_TYPE_LABELS[property.type]}</TableCell>
-                <TableCell>{OPERATION_TYPE_LABELS[property.operation]}</TableCell>
-                <TableCell>
-                  {property.currency} {property.price}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={property.available ? "default" : "secondary"}>
-                    {property.available ? "Disponible" : "No disponible"}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-4">
-          {page > 1 ? (
-            <Button asChild variant="outline">
-              <Link href={`/properties?page=${page - 1}`}>Anterior</Link>
-            </Button>
-          ) : (
-            <Button variant="outline" disabled>
-              Anterior
-            </Button>
-          )}
-          <span className="text-sm text-muted-foreground">
-            Página {page} de {totalPages}
-          </span>
-          {page < totalPages ? (
-            <Button asChild variant="outline">
-              <Link href={`/properties?page=${page + 1}`}>Siguiente</Link>
-            </Button>
-          ) : (
-            <Button variant="outline" disabled>
-              Siguiente
-            </Button>
-          )}
+      {properties.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-16 text-center">
+          <p className="text-sm text-muted-foreground">
+            Ninguna propiedad coincide con los filtros aplicados.
+          </p>
+          <Link
+            href="/properties"
+            className="text-sm underline underline-offset-4 hover:text-foreground"
+          >
+            Limpiar filtros
+          </Link>
         </div>
+      ) : (
+        <>
+          <PropertiesTable properties={properties} />
+          <PropertiesPagination page={page} totalPages={totalPages} searchParams={params} />
+        </>
       )}
     </div>
   );
