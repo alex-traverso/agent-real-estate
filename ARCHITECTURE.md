@@ -220,7 +220,10 @@ src/
 │   ├── properties.controller.ts    # Admin CRUD (SupabaseAuthGuard-protected).
 │   │                                  GET /properties/zones is declared before
 │   │                                  GET /:id so the literal path wins the
-│   │                                  route match
+│   │                                  route match. GET /properties accepts
+│   │                                  page/limit plus admin list filters:
+│   │                                  search, zone, operation, type, available,
+│   │                                  sort (created_at|price|title), order (asc|desc)
 │   ├── properties.service.ts       # Agent-facing search (filters/semantic/
 │   │                                  address) + admin CRUD (list/get/create/
 │   │                                  update/setAvailability)
@@ -312,24 +315,92 @@ proxy.ts                          # Root proxy (formerly "middleware"): refreshe
 components.json                   # shadcn/ui config (style: radix-nova, neutral base)
 lib/
 ├── utils.ts                       # shadcn's `cn()` helper
+├── format.ts                      # formatPrice/formatArea/formatNumber/formatDate/
+│                                     formatBudget/formatPhone + EMPTY_VALUE ("—")
+├── motion.ts                      # The panel's motion vocabulary: springDefault/
+│                                     springMomentum/springSheet/fadeOnly transitions,
+│                                     REVEAL_STAGGER/REVEAL_DISTANCE + revealVariants()
+│                                     for staggered list reveals
+├── lead-labels.ts                 # LEAD_STATUS_LABELS, LEAD_STATUS_ORDER (Spanish)
+├── property-labels.ts             # OPERATION_TYPE_LABELS, PROPERTY_TYPE_LABELS (Spanish)
+├── api/
+│   └── client.ts                  # Server-only fetch wrapper for apps/api: attaches the
+│                                     current Supabase session's access token as Bearer.
+│                                     apiGet() (Server Components, throws/notFound() on
+│                                     failure) and apiMutate() (Server Actions, returns
+│                                     {ok,error} instead of throwing). Never called from
+│                                     the browser — no CORS involved on apps/api.
 └── supabase/
     ├── client.ts                  # Browser client (Client Components: login, forms)
     ├── server.ts                  # Server client (Server Components, reads/writes
     │                                 cookies via next/headers)
     └── middleware.ts               # updateSession() — called from proxy.ts
 components/
-└── ui/                            # shadcn/ui primitives (button, input, label, card,
-                                     table, badge, select, textarea, switch, …)
-lib/api/
-└── client.ts                      # Server-only fetch wrapper for apps/api: attaches the
-                                     current Supabase session's access token as Bearer.
-                                     apiGet() (Server Components, throws/notFound() on
-                                     failure) and apiMutate() (Server Actions, returns
-                                     {ok,error} instead of throwing). Never called from
-                                     the browser — no CORS involved on apps/api.
+├── ui/                            # shadcn/ui primitives (button, input, label, card,
+│                                     table, badge, select, textarea, switch, tabs,
+│                                     tooltip, dialog, sheet, dropdown-menu, avatar,
+│                                     separator, skeleton, sonner, pagination, …) plus
+│                                     data-pagination.tsx — the shared page/limit
+│                                     pagination control (generalized in PR F; used by
+│                                     both properties and leads, not properties-specific
+│                                     despite living under components/ui/)
+├── motion/
+│   └── reveal.tsx                 # <Stagger>/<RevealItem>/<Reveal> — staggered-reveal
+│                                     primitives built on lib/motion.ts's revealVariants(),
+│                                     each already reading useReducedMotion() internally
+├── shell/                         # Dashboard chrome, shared by every (dashboard) route
+│   ├── dashboard-shell.tsx        # Client Component: owns sidebar-collapsed state
+│   │                                 (persisted to localStorage), composes AppSidebar
+│   │                                 + Topbar + a centered content well
+│   ├── app-sidebar.tsx            # Desktop nav rail (hidden below `md`), animated
+│   │                                 width-collapse via motion.aside + springDefault
+│   ├── mobile-nav.tsx             # Sheet-based nav for below `md`, same NAV_ITEMS
+│   ├── nav-items.ts               # NAV_ITEMS + isNavItemActive() — single source of
+│   │                                 truth shared by AppSidebar and MobileNav
+│   ├── topbar.tsx                 # Sticky header: MobileNav trigger, breadcrumb, UserMenu
+│   ├── breadcrumb-trail.tsx       # Route-derived breadcrumb, aria-current on the leaf
+│   ├── page-header.tsx            # Eyebrow + title, used at the top of every page
+│   ├── theme-toggle.tsx           # Light/dark switch (next-themes)
+│   ├── user-menu.tsx              # Avatar dropdown: agency/user info + logout
+│   └── brand.tsx                  # "Luca" wordmark used in the sidebar header
+├── dashboard/                     # Dashboard home widgets, all consuming AgencyStats
+│   ├── stat-tiles.tsx             # 4 KPI tiles, staggered reveal on mount
+│   ├── chart-panel.tsx            # Card chrome wrapper shared by both charts below
+│   ├── leads-trend-chart.tsx      # Recharts line chart — leads per day (30d)
+│   ├── top-zones-chart.tsx        # Recharts bar chart — property count by zone
+│   └── recent-leads-list.tsx      # Latest leads, staggered reveal, links to detail
+├── properties/
+│   ├── filter-bar.tsx             # URL-state filters: search (debounced) + zone/
+│   │                                 operation/type/available selects; each
+│   │                                 SelectTrigger carries an explicit aria-label
+│   │                                 since the visible placeholder disappears once
+│   │                                 a value is picked
+│   ├── properties-table.tsx       # TanStack Table: manual sort/pagination (state
+│   │                                 lives in the URL), column visibility, staggered
+│   │                                 row reveal via <Stagger as="tbody">/<RevealItem as="tr">
+│   ├── excel-upload-dialog.tsx    # Dialog wrapper around the bulk-upload flow
+│   └── property-form-section.tsx  # Card wrapper for a group of related fields in
+│                                     property-form.tsx (Identificación, Ubicación, …)
+├── leads/
+│   ├── leads-tabs.tsx             # Status filter tabs (Todos/Nuevo/Contactado/Cerrado),
+│   │                                 aria-current on the active tab
+│   └── lead-status-menu.tsx       # Dropdown bound to updateLeadStatus, reused in both
+│                                     the list rows and the detail header
+├── skeletons/                     # loading.tsx fallbacks, one per page shape
+│   ├── table-skeleton.tsx         # Properties/leads list tables
+│   ├── detail-skeleton.tsx        # Property/lead detail pages
+│   ├── chat-skeleton.tsx          # Lead detail's WhatsApp conversation transcript
+│   ├── stat-tiles-skeleton.tsx    # Mirrors StatTiles' markup so the dashboard home
+│   │                                 doesn't shift layout between loading and loaded
+│   └── chart-panel-skeleton.tsx   # Mirrors ChartPanel's card chrome
+├── password-input.tsx             # Reused by login/forgot-password/reset-password
+└── theme-provider.tsx             # next-themes provider, wraps the root layout
 app/
 ├── layout.tsx                     # Root layout — fonts, globals.css, {children}
-├── globals.css                    # Tailwind v4 + shadcn theme tokens
+├── globals.css                    # Tailwind v4 + shadcn theme tokens, global
+│                                     prefers-reduced-motion/prefers-reduced-transparency
+│                                     rules
+├── not-found.tsx                  # Root-level 404 (outside the auth check)
 ├── (auth)/
 │   ├── layout.tsx                 # Centered shell, no dashboard nav
 │   ├── login/
@@ -341,13 +412,23 @@ app/
 └── (dashboard)/
     ├── layout.tsx                 # Protected layout — Server Component,
     │                                 supabase.auth.getUser() + redirect('/login')
-    │                                 if unauthenticated; header + logout button
+    │                                 if unauthenticated; renders DashboardShell
     ├── actions.ts                 # 'use server' — logout() (signOut + redirect)
     ├── error.tsx                  # Client Component boundary — generic Spanish
     │                                 error + retry, catches apiGet()/action throws
-    ├── page.tsx                   # Dashboard home (static welcome, Epic 10)
+    ├── not-found.tsx               # Dashboard-scoped 404
+    ├── loading.tsx                 # Route-level fallback for pages without their own
+    ├── stats.types.ts              # AgencyStats — the GET /stats response shape,
+    │                                 shared by the dashboard home, StatTiles, both
+    │                                 charts and LeadsTabs' per-status counts
+    ├── page.tsx                    # Dashboard home: GET /stats + latest 5 leads →
+    │                                 StatTiles + LeadsTrendChart + TopZonesChart +
+    │                                 RecentLeadsList, or an empty-catalog prompt when
+    │                                 stats.properties.total is 0
     ├── properties/
-    │   ├── page.tsx                # List (GET /properties, paginated) + Excel upload
+    │   ├── page.tsx                # List (GET /properties, paginated/filtered/sorted
+    │   │                             via FilterBar + PropertiesTable) + Excel upload
+    │   ├── loading.tsx              # TableSkeleton fallback
     │   ├── actions.ts              # Server Actions: createProperty, updateProperty,
     │   │                             setPropertyAvailability, parsePropertiesExcel,
     │   │                             confirmPropertiesUpload
@@ -365,31 +446,29 @@ app/
     │   │                             with the correct headers + an example row
     │   │                             (auth-checked directly, Route Handlers aren't
     │   │                             wrapped by the dashboard layout's auth check)
-    │   ├── availability-toggle.tsx # Switch bound directly to setPropertyAvailability
+    │   ├── availability-toggle.tsx # Switch bound directly to setPropertyAvailability,
+    │   │                             id/htmlFor-associated with its Label for a11y
     │   ├── new/
     │   │   └── page.tsx            # Manual create form
     │   └── [id]/
-    │       └── page.tsx            # Detail: pre-filled edit form + availability toggle
+    │       ├── page.tsx            # Detail: pre-filled edit form + availability toggle
+    │       └── loading.tsx          # DetailSkeleton fallback
     └── leads/
         ├── page.tsx                 # List (GET /leads, paginated) + status filter tabs
         │                             (Todos/Nuevo/Contactado/Cerrado via ?status=) +
-        │                             inline status control per row
+        │                             inline status control per row, staggered row reveal
+        ├── loading.tsx               # TableSkeleton fallback
         ├── actions.ts                # Server Action: updateLeadStatus (PATCH
         │                             /leads/:id/status), called directly from the
         │                             client — same pattern as setPropertyAvailability
-        ├── lead-status-control.tsx   # Select bound to updateLeadStatus (Client
-        │                             Component), reused in both the list rows and
-        │                             the detail header
         └── [id]/
-            └── page.tsx              # Detail: lead fields, link to the matched
-                                      # property (if any), status control, and the
-                                      # WhatsApp conversation history (GET
-                                      # /leads/:id/conversation) rendered as a chat
-                                      # transcript, or an empty state if the lead
-                                      # wasn't created from a conversation
-        ├── page.tsx                # Lead list with status filter
-        └── [id]/
-            └── page.tsx            # Lead detail + conversation history
+            ├── page.tsx              # Detail: lead fields, link to the matched
+            │                         # property (if any), status control, and the
+            │                         # WhatsApp conversation history (GET
+            │                         # /leads/:id/conversation) rendered as a chat
+            │                         # transcript, or an empty state if the lead
+            │                         # wasn't created from a conversation
+            └── loading.tsx           # DetailSkeleton + ChatSkeleton fallback
 ```
 
 ---

@@ -1,3 +1,4 @@
+import { Stagger, RevealItem } from "@/components/motion/reveal";
 import { formatNumber, formatPrice } from "@/lib/format";
 import type { AgencyStats } from "@/app/(dashboard)/stats.types";
 
@@ -41,16 +42,17 @@ export function StatTiles({ stats }: StatTilesProps) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <Stagger as="div" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       {tiles.map((tile) => (
-        <div
+        <RevealItem
           key={tile.label}
+          as="div"
           className="flex flex-col gap-2 rounded-xl bg-card p-5 ring-1 ring-foreground/10"
         >
           <span className="type-eyebrow">{tile.label}</span>
           <span className="type-subtitle text-foreground">{tile.value}</span>
-        </div>
+        </RevealItem>
       ))}
-    </div>
+    </Stagger>
   );
 }

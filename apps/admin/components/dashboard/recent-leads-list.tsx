@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Tables } from "types";
+import { Stagger, RevealItem } from "@/components/motion/reveal";
 import { LEAD_STATUS_LABELS } from "@/lib/lead-labels";
 import { formatDate } from "@/lib/format";
 
@@ -17,9 +18,9 @@ export function RecentLeadsList({ leads }: RecentLeadsListProps) {
           Todavía no hay leads.
         </p>
       ) : (
-        <ul className="flex flex-col divide-y divide-border">
+        <Stagger as="ul" className="flex flex-col divide-y divide-border">
           {leads.map((lead) => (
-            <li key={lead.id}>
+            <RevealItem key={lead.id} as="li">
               <Link
                 href={`/leads/${lead.id}`}
                 className="flex items-center justify-between gap-4 rounded-lg px-2 py-3 text-sm transition-colors hover:bg-muted/50"
@@ -34,9 +35,9 @@ export function RecentLeadsList({ leads }: RecentLeadsListProps) {
                   {formatDate(lead.created_at)}
                 </span>
               </Link>
-            </li>
+            </RevealItem>
           ))}
-        </ul>
+        </Stagger>
       )}
     </div>
   );

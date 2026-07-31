@@ -89,7 +89,7 @@ export function FilterBar({ zones }: FilterBarProps) {
         value={searchParams.get("zone") ?? ALL_VALUE}
         onValueChange={(value) => setParam("zone", value)}
       >
-        <SelectTrigger>
+        <SelectTrigger aria-label="Zona">
           <SelectValue placeholder="Zona" />
         </SelectTrigger>
         <SelectContent>
@@ -106,7 +106,7 @@ export function FilterBar({ zones }: FilterBarProps) {
         value={searchParams.get("operation") ?? ALL_VALUE}
         onValueChange={(value) => setParam("operation", value)}
       >
-        <SelectTrigger>
+        <SelectTrigger aria-label="Operación">
           <SelectValue placeholder="Operación" />
         </SelectTrigger>
         <SelectContent>
@@ -123,7 +123,7 @@ export function FilterBar({ zones }: FilterBarProps) {
         value={searchParams.get("type") ?? ALL_VALUE}
         onValueChange={(value) => setParam("type", value)}
       >
-        <SelectTrigger>
+        <SelectTrigger aria-label="Tipo">
           <SelectValue placeholder="Tipo" />
         </SelectTrigger>
         <SelectContent>
@@ -140,7 +140,7 @@ export function FilterBar({ zones }: FilterBarProps) {
         value={searchParams.get("available") ?? ALL_VALUE}
         onValueChange={(value) => setParam("available", value)}
       >
-        <SelectTrigger>
+        <SelectTrigger aria-label="Disponibilidad">
           <SelectValue placeholder="Disponibilidad" />
         </SelectTrigger>
         <SelectContent>

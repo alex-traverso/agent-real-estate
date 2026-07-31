@@ -9,7 +9,7 @@ type StaggerProps = {
   children: ReactNode;
   className?: string;
   /** Renders as this element instead of a div — `ul`, `section`, `tbody`, … */
-  as?: "div" | "ul" | "ol" | "section";
+  as?: "div" | "ul" | "ol" | "section" | "tbody";
 };
 
 /**

@@ -61,6 +61,11 @@ The project is a monorepo containing:
 - **Framework:** Next.js 15 with App Router
 - **UI components:** shadcn/ui
 - **Styling:** Tailwind CSS
+- **Charts:** Recharts
+- **Tables:** TanStack Table (`@tanstack/react-table`)
+- **Motion:** Motion (`motion`, formerly Framer Motion)
+- **Theming:** next-themes
+- **Toasts:** Sonner
 - **Auth:** Supabase Auth
 - **Hosting:** Vercel
 

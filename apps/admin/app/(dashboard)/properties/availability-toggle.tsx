@@ -31,10 +31,17 @@ export function AvailabilityToggle({
     });
   }
 
+  const switchId = `available-switch-${propertyId}`;
+
   return (
     <div className="flex items-center gap-3">
-      <Switch checked={available} disabled={pending} onCheckedChange={handleChange} />
-      <Label>{available ? "Disponible" : "No disponible"}</Label>
+      <Switch
+        id={switchId}
+        checked={available}
+        disabled={pending}
+        onCheckedChange={handleChange}
+      />
+      <Label htmlFor={switchId}>{available ? "Disponible" : "No disponible"}</Label>
     </div>
   );
 }
