@@ -6,7 +6,11 @@ import { motion, useReducedMotion } from "motion/react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Brand } from "./brand";
 import { NAV_ITEMS, isNavItemActive } from "./nav-items";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { fadeOnly, springDefault } from "@/lib/motion";
@@ -32,7 +36,7 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
     <motion.aside
       animate={{ width: collapsed ? WIDTH_COLLAPSED : WIDTH_EXPANDED }}
       transition={reduced ? fadeOnly : springDefault}
-      className="hidden shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar md:flex"
+      className="sticky top-0 hidden h-screen shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar md:flex"
     >
       <div className="flex h-16 shrink-0 items-center px-4">
         <Link href="/" className="flex items-center overflow-hidden">
@@ -72,12 +76,7 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
               )}
             >
               <Icon className="size-4 shrink-0" />
-              <span
-                className={cn(
-                  "whitespace-nowrap",
-                  collapsed && "sr-only",
-                )}
-              >
+              <span className={cn("whitespace-nowrap", collapsed && "sr-only")}>
                 {item.label}
               </span>
             </Link>

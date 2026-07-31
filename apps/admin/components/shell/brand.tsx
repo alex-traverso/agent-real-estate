@@ -14,7 +14,7 @@ type BrandProps = {
  */
 export function Brand({ variant = "full", className }: BrandProps) {
   return (
-    <div className={cn("flex flex-col gap-0.5", className)}>
+    <div className={cn("flex flex-col gap-1", className)}>
       {variant === "full" && (
         <span className="type-eyebrow">Agent Real Estate</span>
       )}
