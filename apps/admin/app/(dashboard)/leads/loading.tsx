@@ -11,7 +11,7 @@ export default function LeadsLoading() {
           <Skeleton key={index} className="h-4 w-20" />
         ))}
       </div>
-      <TableSkeleton columns={5} rows={8} />
+      <TableSkeleton columns={7} rows={8} />
     </div>
   );
 }

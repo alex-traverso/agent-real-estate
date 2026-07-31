@@ -8,16 +8,19 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 
-type PropertiesPaginationProps = {
+type DataPaginationProps = {
   page: number;
   totalPages: number;
   /** Every filter param except `page`, preserved on every page link. */
   searchParams: Record<string, string | undefined>;
+  /** The list route this pagination belongs to, e.g. `/properties`, `/leads`. */
+  basePath: string;
 };
 
 const SIBLING_COUNT = 1;
 
 function buildHref(
+  basePath: string,
   searchParams: Record<string, string | undefined>,
   page: number,
 ): string {
@@ -26,7 +29,7 @@ function buildHref(
     if (value && key !== "page") params.set(key, value);
   }
   params.set("page", String(page));
-  return `/properties?${params.toString()}`;
+  return `${basePath}?${params.toString()}`;
 }
 
 /** Page numbers to render, condensed with ellipses once there are many pages. */
@@ -48,16 +51,18 @@ function buildPageItems(page: number, totalPages: number): (number | "ellipsis")
 }
 
 /**
- * Page-number pagination for the properties table, built on the shadcn
+ * Page-number pagination for a server-driven list, built on the shadcn
  * `Pagination` primitives. A Server Component: the current filters are
  * already known to the caller (they come from `searchParams`), so building
- * hrefs needs no client-side URL state of its own.
+ * hrefs needs no client-side URL state of its own. Shared by every list page
+ * (properties, leads) via the `basePath` prop.
  */
-export function PropertiesPagination({
+export function DataPagination({
   page,
   totalPages,
   searchParams,
-}: PropertiesPaginationProps) {
+  basePath,
+}: DataPaginationProps) {
   if (totalPages <= 1) return null;
 
   const pageItems = buildPageItems(page, totalPages);
@@ -68,7 +73,7 @@ export function PropertiesPagination({
         <PaginationItem>
           <PaginationPrevious
             text="Anterior"
-            href={buildHref(searchParams, Math.max(1, page - 1))}
+            href={buildHref(basePath, searchParams, Math.max(1, page - 1))}
             aria-disabled={page === 1}
             className={page === 1 ? "pointer-events-none opacity-50" : undefined}
           />
@@ -81,7 +86,7 @@ export function PropertiesPagination({
           ) : (
             <PaginationItem key={item}>
               <PaginationLink
-                href={buildHref(searchParams, item)}
+                href={buildHref(basePath, searchParams, item)}
                 isActive={item === page}
               >
                 {item}
@@ -92,7 +97,7 @@ export function PropertiesPagination({
         <PaginationItem>
           <PaginationNext
             text="Siguiente"
-            href={buildHref(searchParams, Math.min(totalPages, page + 1))}
+            href={buildHref(basePath, searchParams, Math.min(totalPages, page + 1))}
             aria-disabled={page === totalPages}
             className={
               page === totalPages ? "pointer-events-none opacity-50" : undefined

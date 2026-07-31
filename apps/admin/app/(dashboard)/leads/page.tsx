@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { Enums, Tables } from "types";
 import { apiGet } from "@/lib/api/client";
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -10,10 +9,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PageHeader } from "@/components/shell/page-header";
+import { LeadsTabs } from "@/components/leads/leads-tabs";
+import { LeadStatusMenu } from "@/components/leads/lead-status-menu";
+import { DataPagination } from "@/components/ui/data-pagination";
 import { OPERATION_TYPE_LABELS } from "@/lib/property-labels";
-import { LEAD_STATUS_LABELS, LEAD_STATUS_ORDER } from "@/lib/lead-labels";
-import { formatBudget } from "@/lib/format";
-import { LeadStatusControl } from "./lead-status-control";
+import { LEAD_STATUS_ORDER } from "@/lib/lead-labels";
+import { EMPTY_VALUE, formatBudget, formatDate, formatPhone } from "@/lib/format";
+import type { AgencyStats } from "@/app/(dashboard)/stats.types";
 
 type LeadStatus = Enums<"lead_status">;
 
@@ -32,45 +35,20 @@ export default async function LeadsPage({
   const page = Math.max(1, Number(pageParam) || 1);
   const status = isLeadStatus(statusParam) ? statusParam : undefined;
 
-  const { data: leads, total } = await apiGet<{
-    data: Tables<"leads">[];
-    total: number;
-  }>(
-    `/leads?page=${page}&limit=${PAGE_SIZE}${status ? `&status=${status}` : ""}`,
-  );
+  const [{ data: leads, total }, stats] = await Promise.all([
+    apiGet<{ data: Tables<"leads">[]; total: number }>(
+      `/leads?page=${page}&limit=${PAGE_SIZE}${status ? `&status=${status}` : ""}`,
+    ),
+    apiGet<AgencyStats>("/stats"),
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const tabs: { label: string; status?: LeadStatus }[] = [
-    { label: "Todos" },
-    ...LEAD_STATUS_ORDER.map((value) => ({
-      label: LEAD_STATUS_LABELS[value],
-      status: value,
-    })),
-  ];
-
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="font-heading text-2xl font-medium">Leads</h1>
+      <PageHeader eyebrow="Prospectos" title="Leads" />
 
-      <div className="flex items-center gap-4 border-b">
-        {tabs.map((tab) => {
-          const active = tab.status === status;
-          return (
-            <Link
-              key={tab.label}
-              href={tab.status ? `/leads?status=${tab.status}` : "/leads"}
-              className={
-                active
-                  ? "border-b-2 border-foreground pb-2 text-sm font-medium text-foreground"
-                  : "border-b-2 border-transparent pb-2 text-sm text-muted-foreground hover:text-foreground"
-              }
-            >
-              {tab.label}
-            </Link>
-          );
-        })}
-      </div>
+      <LeadsTabs activeStatus={status} stats={stats.leads} />
 
       <div className="rounded-xl border">
         <Table>
@@ -99,34 +77,29 @@ export default async function LeadsPage({
             {leads.map((lead) => (
               <TableRow key={lead.id}>
                 <TableCell>
-                  <Link href={`/leads/${lead.id}`} className="hover:underline">
+                  <Link href={`/leads/${lead.id}`} className="font-medium hover:underline">
                     {lead.name || "Sin nombre"}
                   </Link>
                 </TableCell>
-                <TableCell>{lead.phone}</TableCell>
+                <TableCell>
+                  <span className="type-data">{formatPhone(lead.phone)}</span>
+                </TableCell>
                 <TableCell>
                   {lead.operation_type
                     ? OPERATION_TYPE_LABELS[lead.operation_type]
-                    : "—"}
+                    : EMPTY_VALUE}
                 </TableCell>
-                <TableCell>{lead.preferred_zone || "—"}</TableCell>
+                <TableCell>{lead.preferred_zone || EMPTY_VALUE}</TableCell>
                 <TableCell>
-                  {formatBudget(
-                    lead.budget_min,
-                    lead.budget_max,
-                    lead.currency,
-                  )}
+                  <span className="type-data">
+                    {formatBudget(lead.budget_min, lead.budget_max, lead.currency)}
+                  </span>
                 </TableCell>
                 <TableCell>
-                  <LeadStatusControl
-                    leadId={lead.id}
-                    initialStatus={lead.status ?? "new"}
-                  />
+                  <LeadStatusMenu leadId={lead.id} initialStatus={lead.status ?? "new"} />
                 </TableCell>
                 <TableCell>
-                  {lead.created_at
-                    ? new Date(lead.created_at).toLocaleDateString("es-AR")
-                    : "—"}
+                  <span className="type-data">{formatDate(lead.created_at)}</span>
                 </TableCell>
               </TableRow>
             ))}
@@ -134,39 +107,12 @@ export default async function LeadsPage({
         </Table>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-4">
-          {page > 1 ? (
-            <Button asChild variant="outline">
-              <Link
-                href={`/leads?page=${page - 1}${status ? `&status=${status}` : ""}`}
-              >
-                Anterior
-              </Link>
-            </Button>
-          ) : (
-            <Button variant="outline" disabled>
-              Anterior
-            </Button>
-          )}
-          <span className="text-sm text-muted-foreground">
-            Página {page} de {totalPages}
-          </span>
-          {page < totalPages ? (
-            <Button asChild variant="outline">
-              <Link
-                href={`/leads?page=${page + 1}${status ? `&status=${status}` : ""}`}
-              >
-                Siguiente
-              </Link>
-            </Button>
-          ) : (
-            <Button variant="outline" disabled>
-              Siguiente
-            </Button>
-          )}
-        </div>
-      )}
+      <DataPagination
+        page={page}
+        totalPages={totalPages}
+        searchParams={{ status }}
+        basePath="/leads"
+      />
     </div>
   );
 }
