@@ -1,8 +1,22 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
+import type { Tables } from 'types';
 import { SupabaseService } from '../common/supabase/supabase.service';
+import type { CreateAgencyDto } from './dto/create-agency.dto';
+
+/** Postgres unique_violation error code. */
+const UNIQUE_VIOLATION = '23505';
+
+type Agency = Tables<'agencies'>;
 
 /**
- * Resolves which agency (tenant) an inbound WhatsApp message belongs to.
+ * Resolves which agency (tenant) an inbound WhatsApp message belongs to, and
+ * (for the admin panel) which agency a Supabase Auth user belongs to — or
+ * lets them create one if they have none yet (onboarding).
  *
  * The webhook payload carries `metadata.phone_number_id` (the business number
  * that received the message); the agency that owns that number is looked up
@@ -87,5 +101,92 @@ export class AgencyService {
 
     this.emailCache.set(agencyId, data.email);
     return data.email;
+  }
+
+  /**
+   * Returns the agency a Supabase Auth user belongs to, or `null` if they
+   * have none yet — the admin panel's signal to redirect to onboarding
+   * instead of the dashboard. Two queries (agency_users -> agencies) rather
+   * than a nested select, matching this codebase's existing query style.
+   */
+  async findByUserId(userId: string): Promise<Agency | null> {
+    const { data: agencyUser, error: membershipError } =
+      await this.supabase.client
+        .from('agency_users')
+        .select('agency_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (membershipError) {
+      this.logger.error(
+        `[AgencyService] Failed to resolve agency membership | userId: ${userId} | error: ${membershipError.message}`,
+      );
+      throw new InternalServerErrorException('Failed to resolve agency');
+    }
+
+    if (!agencyUser) {
+      return null;
+    }
+
+    const { data: agency, error: agencyError } = await this.supabase.client
+      .from('agencies')
+      .select('*')
+      .eq('id', agencyUser.agency_id)
+      .maybeSingle();
+
+    if (agencyError || !agency) {
+      this.logger.error(
+        `[AgencyService] Failed to load agency | agencyId: ${agencyUser.agency_id} | error: ${
+          agencyError?.message ?? 'no row returned'
+        }`,
+      );
+      throw new InternalServerErrorException('Failed to resolve agency');
+    }
+
+    return agency;
+  }
+
+  /**
+   * Onboarding: creates an agency and links `userId` as its owner via the
+   * create_agency_with_owner RPC, which does both inserts in one transaction
+   * (see the migration) — a failed link can never leave an orphaned agency
+   * behind. Unique-constraint violations are mapped to a Spanish, user-facing
+   * ConflictException by constraint name; anything else is a generic 500.
+   */
+  async createForUser(userId: string, dto: CreateAgencyDto): Promise<Agency> {
+    const { data, error } = await this.supabase.client.rpc(
+      'create_agency_with_owner',
+      {
+        p_name: dto.name,
+        p_email: dto.email,
+        p_user_id: userId,
+        ...(dto.phone ? { p_phone: dto.phone } : {}),
+      },
+    );
+
+    if (error) {
+      if (error.code === UNIQUE_VIOLATION) {
+        if (error.message.includes('agency_users_user_id_key')) {
+          throw new ConflictException('Ya tenés una inmobiliaria creada.');
+        }
+        if (error.message.includes('agencies_email_key')) {
+          throw new ConflictException('Ese email ya está en uso.');
+        }
+      }
+
+      this.logger.error(
+        `[AgencyService] Failed to create agency | userId: ${userId} | error: ${error.message}`,
+      );
+      throw new InternalServerErrorException('Failed to create agency');
+    }
+
+    if (!data) {
+      this.logger.error(
+        `[AgencyService] create_agency_with_owner returned no row | userId: ${userId}`,
+      );
+      throw new InternalServerErrorException('Failed to create agency');
+    }
+
+    return data;
   }
 }

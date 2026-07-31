@@ -201,7 +201,11 @@ src/
 │
 ├── agency/
 │   ├── agency.module.ts
-│   └── agency.service.ts           # Resolves phone_number_id → agency_id (cached)
+│   ├── agency.service.ts           # Resolves phone_number_id → agency_id (cached);
+│   │                                  findByUserId + createForUser for onboarding
+│   ├── agency.controller.ts        # GET /agencies/me, POST /agencies —
+│   │                                  SupabaseUserGuard, not SupabaseAuthGuard
+│   └── dto/create-agency.dto.ts
 │
 ├── conversation/
 │   ├── conversation.module.ts
@@ -298,13 +302,23 @@ src/
 │
 ├── auth/
 │   ├── auth.module.ts
-│   ├── supabase-auth.guard.ts      # Admin panel auth: verifies the Supabase
-│   │                                  Auth bearer token, resolves agency_id via
+│   ├── supabase-token.util.ts      # Shared token verification (extract Bearer +
+│   │                                  supabase.auth.getUser), used by both guards
+│   │                                  below so they can never diverge on it
+│   ├── supabase-auth.guard.ts      # Admin panel auth: verifies the token via the
+│   │                                  util above, then resolves agency_id via
 │   │                                  agency_users, attaches { userId, agencyId }
 │   │                                  to the request — see Auth Boundary above
+│   ├── supabase-user.guard.ts      # Onboarding-only variant: verifies the token
+│   │                                  but never looks up agency_users — the one
+│   │                                  guard that must not reject an agency-less
+│   │                                  user (agencies.controller.ts)
 │   ├── current-agency.decorator.ts # @CurrentAgency() — reads the resolved
 │   │                                  agency_id set by SupabaseAuthGuard
-│   └── types/authenticated-request.type.ts
+│   ├── current-user.decorator.ts   # @CurrentUser() — reads the userId set by
+│   │                                  SupabaseUserGuard
+│   ├── types/authenticated-request.type.ts
+│   └── types/authenticated-user-request.type.ts
 │
 └── common/
     └── supabase/
@@ -412,17 +426,30 @@ app/
 │                                     rules
 ├── not-found.tsx                  # Root-level 404 (outside the auth check)
 ├── (auth)/
-│   ├── layout.tsx                 # Centered shell, no dashboard nav
+│   ├── layout.tsx                 # Split-screen shell (brand + card), no dashboard
+│   │                                 nav. Not "public pages" — onboarding below
+│   │                                 still requires a session, it just isn't
+│   │                                 dashboard chrome
 │   ├── login/
 │   │   └── page.tsx               # Login (Spanish UI), no self-signup
 │   ├── forgot-password/
 │   │   └── page.tsx               # Requests a password-reset email
-│   └── reset-password/
-│       └── page.tsx               # Sets a new password (landed on via the reset email)
+│   ├── reset-password/
+│   │   └── page.tsx               # Sets a new password (landed on via the reset email)
+│   └── onboarding/
+│       ├── page.tsx               # GET /agencies/me: redirects to /login (no
+│       │                            session) or / (already has an agency);
+│       │                            otherwise renders the form with the user's
+│       │                            email prefilled
+│       ├── onboarding-form.tsx    # useActionState form (name, email, phone)
+│       └── actions.ts             # createAgency — POST /agencies, redirects to
+│                                     / on success, inline error otherwise
 └── (dashboard)/
     ├── layout.tsx                 # Protected layout — Server Component,
     │                                 supabase.auth.getUser() + redirect('/login')
-    │                                 if unauthenticated; renders DashboardShell
+    │                                 if unauthenticated; then GET /agencies/me +
+    │                                 redirect('/onboarding') if the user has no
+    │                                 agency yet; renders DashboardShell
     ├── actions.ts                 # 'use server' — logout() (signOut + redirect)
     ├── error.tsx                  # Client Component boundary — generic Spanish
     │                                 error + retry, catches apiGet()/action throws
@@ -637,6 +664,8 @@ Each layer is independent. A failure at one layer does not bypass the others.
 | WhatsApp clients | None (public webhook) | Via NestJS service role — agency_id enforced in code |
 | Admin panel users | Supabase Auth (email/password), access token sent as `Authorization: Bearer` to the NestJS API | Via NestJS service role — `SupabaseAuthGuard` verifies the token (`supabase.auth.getUser`) and resolves `agency_id` from `agency_users`; every admin route is `agency_id`-scoped in code, same model as the WhatsApp path. RLS policies remain in place as defense in depth, not the primary access path. |
 | NestJS backend | Service role key | Bypasses RLS — agency_id enforced in every query |
+
+**Onboarding exception:** `GET /agencies/me` and `POST /agencies` are the only admin routes that do **not** require a linked agency — a user with none yet must still be able to check for one and create it. They sit behind `SupabaseUserGuard` (verifies the token, attaches `{ userId }`, never queries `agency_users`) instead of `SupabaseAuthGuard`, and use `@CurrentUser()` instead of `@CurrentAgency()`. `POST /agencies` calls the `create_agency_with_owner` Postgres RPC, which inserts `agencies` + `agency_users` in one transaction — a failed link can never leave an orphaned agency row (relevant since `agencies.email` is `UNIQUE`). Every other admin route stays behind `SupabaseAuthGuard`, unchanged.
 
 ---
 
