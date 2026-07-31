@@ -3,7 +3,7 @@ services:
     name: agent-real-estate-api
     runtime: node
     rootDir: apps/api
-    buildCommand: corepack enable && cd ../.. && yarn workspace types build && yarn workspace api build
+    buildCommand: corepack enable && cd ../.. && yarn install --immutable && yarn workspace types build && yarn workspace api build
     startCommand: yarn workspace api start:prod
     envVars:
       - key: NODE_VERSION
