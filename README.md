@@ -34,7 +34,7 @@ WhatsApp Client
       ↓
 Meta Cloud API (webhook)
       ↓
-NestJS API (Railway)
+NestJS API (Render)
   ├── Webhook validation & rate limiting
   ├── Conversation session management
   ├── Claude AI agent (tool calling)
@@ -65,7 +65,7 @@ Admin Panel (Next.js + Vercel)
 - **Vector search:** pgvector via Supabase
 - **Messaging:** Meta Cloud API (WhatsApp)
 - **Email:** Resend
-- **Hosting:** Railway
+- **Hosting:** Render
 
 ### Frontend (`apps/admin`)
 
@@ -299,7 +299,7 @@ GitHub Actions runs on every push and pull request:
 
 Deployment is handled automatically:
 
-- `main` → production (Railway + Vercel)
+- `main` → production (Render + Vercel)
 - `develop` → staging
 - `feature/*` → CI only, no deployment
 
@@ -330,7 +330,7 @@ Luca, the WhatsApp AI agent, can:
 - Prompt injection detection in system prompt
 - Multi-tenancy enforced at query level (`agency_id` on all tables)
 - RLS policies on Supabase for additional data isolation
-- Secrets managed via Railway and Vercel environment variables — never in code
+- Secrets managed via Render and Vercel environment variables — never in code
 
 ---
 

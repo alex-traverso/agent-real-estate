@@ -31,7 +31,7 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 │          │ deploy                      │ deploy                 │
 └──────────┼─────────────────────────────┼───────────────────────┘
            ↓                             ↓
-      Railway                        Vercel
+      Render                         Vercel
    (NestJS API)                  (Next.js Admin)
            │                             │
            └──────────────┬──────────────┘
@@ -43,7 +43,7 @@ Both applications share a single Supabase project (PostgreSQL + pgvector + Auth)
 ### Hosting
 | Service | Platform | Plan |
 |---------|----------|------|
-| NestJS API | Railway | Free tier |
+| NestJS API | Render | Free tier |
 | Next.js Admin | Vercel | Hobby (free) |
 | Database | Supabase | Free tier |
 | Email | Resend | Free tier (3000/month) |
@@ -689,11 +689,11 @@ All checks pass?
   YES → PR can be merged to develop
         ↓
 Merge to develop
-  → Railway auto-deploys api (staging)
+  → Render auto-deploys api (staging)
   → Vercel auto-deploys admin (staging)
         ↓
 Merge develop to main
-  → Railway auto-deploys api (production)
+  → Render auto-deploys api (production)
   → Vercel auto-deploys admin (production)
 ```
 
@@ -701,9 +701,9 @@ Merge develop to main
 
 ## Environment Variables
 
-All secrets are managed via Railway (API) and Vercel (Admin) dashboards. Never in code.
+All secrets are managed via Render (API) and Vercel (Admin) dashboards. Never in code.
 
-### `apps/api` (Railway)
+### `apps/api` (Render)
 ```bash
 ANTHROPIC_API_KEY=          # Claude API
 OPENAI_API_KEY=             # Embeddings

@@ -55,7 +55,7 @@ The project is a monorepo containing:
 - **Vector search:** pgvector via Supabase
 - **Messaging:** Meta Cloud API (WhatsApp)
 - **Email:** Resend
-- **Hosting:** Railway
+- **Hosting:** Render
 
 ### Frontend (`apps/admin`)
 - **Framework:** Next.js 15 with App Router

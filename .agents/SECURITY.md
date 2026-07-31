@@ -55,7 +55,7 @@ Run this checklist on every feature review:
 - [ ] No API keys, tokens, or secrets in source code
 - [ ] No API keys, tokens, or secrets in log output
 - [ ] `.env` file is in `.gitignore` and never committed
-- [ ] All secrets are configured via Railway and Vercel environment variable dashboards
+- [ ] All secrets are configured via Render and Vercel environment variable dashboards
 - [ ] `.env.example` contains only placeholder values, never real credentials
 
 ### Logging
