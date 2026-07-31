@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shell/page-header";
 import { FilterBar } from "@/components/properties/filter-bar";
 import { PropertiesTable } from "@/components/properties/properties-table";
-import { PropertiesPagination } from "@/components/properties/properties-pagination";
+import { DataPagination } from "@/components/ui/data-pagination";
 import { ExcelUploadDialog } from "@/components/properties/excel-upload-dialog";
 
 const PAGE_SIZE = 20;
@@ -132,7 +132,12 @@ export default async function PropertiesPage({
       ) : (
         <>
           <PropertiesTable properties={properties} />
-          <PropertiesPagination page={page} totalPages={totalPages} searchParams={params} />
+          <DataPagination
+            page={page}
+            totalPages={totalPages}
+            searchParams={params}
+            basePath="/properties"
+          />
         </>
       )}
     </div>
