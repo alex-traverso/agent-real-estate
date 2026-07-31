@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { setPropertyAvailability } from "./actions";
@@ -20,8 +21,12 @@ export function AvailabilityToggle({
     startTransition(async () => {
       try {
         await setPropertyAvailability(propertyId, checked);
+        toast.success(
+          checked ? "Propiedad marcada como disponible." : "Propiedad marcada como no disponible.",
+        );
       } catch {
         setAvailable(!checked);
+        toast.error("No se pudo actualizar la disponibilidad. Intentá de nuevo.");
       }
     });
   }

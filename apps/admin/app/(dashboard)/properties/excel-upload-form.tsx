@@ -44,7 +44,7 @@ export function ExcelUploadForm() {
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border p-4">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <Label htmlFor="file">Carga masiva por Excel</Label>
         <p className="text-xs text-muted-foreground">

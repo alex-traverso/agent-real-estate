@@ -11,7 +11,7 @@ export default function PropertiesLoading() {
           <Skeleton key={index} className="h-8 w-28" />
         ))}
       </div>
-      <TableSkeleton columns={6} rows={8} />
+      <TableSkeleton columns={8} rows={8} />
     </div>
   );
 }
