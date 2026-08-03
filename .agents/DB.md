@@ -56,6 +56,11 @@ CREATE TABLE agencies (
 
 `whatsapp_phone_number_id` was added in migration `20260707120000_add_agency_whatsapp_phone_number_id`. The webhook payload carries `metadata.phone_number_id`; the backend resolves it to `agency_id` via this column. `UNIQUE` enforces one agency per number and indexes the lookup.
 
+The column is **nullable and starts empty**: `create_agency_with_owner` doesn't set it, because an agency doesn't have Meta's id at signup. The agency fills it in itself from the admin panel's settings screen (`PATCH /agencies/me` → `AgencyService.updateForAgency`), and can clear it again to disconnect — Postgres allows many `NULL`s under a `UNIQUE` constraint, so any number of agencies can sit unconnected at once. Two consequences to keep in mind when touching this column:
+
+- A duplicate write surfaces as `23505` on `agencies_whatsapp_phone_number_id_key` and is mapped to a Spanish `ConflictException`, never a 500.
+- `AgencyService` caches the `phone_number_id → agency_id` mapping in-process. Because the column is now user-editable, that cache is TTL'd and evicted on update; a stale entry would route one tenant's messages to another. See `ARCHITECTURE.md` → WhatsApp Connection.
+
 #### `agency_users`
 Join table between Supabase Auth users and agencies. Required by the RLS policies below to resolve `auth.uid()` → `agency_id` for the admin panel — without it, those policies have no way to determine which agency the requesting advisor belongs to.
 

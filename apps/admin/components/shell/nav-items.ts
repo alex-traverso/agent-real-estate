@@ -1,4 +1,4 @@
-import { Building, Home, Users } from "lucide-react";
+import { Building, Home, Settings, Users } from "lucide-react";
 import type { ComponentType } from "react";
 
 export type NavItem = {
@@ -12,6 +12,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Inicio", icon: Home },
   { href: "/properties", label: "Propiedades", icon: Building },
   { href: "/leads", label: "Leads", icon: Users },
+  { href: "/settings", label: "Configuración", icon: Settings },
 ];
 
 /**

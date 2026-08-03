@@ -29,5 +29,15 @@ export default async function DashboardLayout({
     redirect("/onboarding");
   }
 
-  return <DashboardShell userEmail={user.email ?? ""}>{children}</DashboardShell>;
+  // Resolved here rather than in a separate fetch: the agency is already
+  // loaded for the check above, and the banner has to live above every
+  // dashboard page anyway.
+  return (
+    <DashboardShell
+      userEmail={user.email ?? ""}
+      whatsappConnected={Boolean(agency.whatsapp_phone_number_id)}
+    >
+      {children}
+    </DashboardShell>
+  );
 }
