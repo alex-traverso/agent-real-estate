@@ -201,11 +201,14 @@ src/
 │
 ├── agency/
 │   ├── agency.module.ts
-│   ├── agency.service.ts           # Resolves phone_number_id → agency_id (cached);
-│   │                                  findByUserId + createForUser for onboarding
-│   ├── agency.controller.ts        # GET /agencies/me, POST /agencies —
-│   │                                  SupabaseUserGuard, not SupabaseAuthGuard
-│   └── dto/create-agency.dto.ts
+│   ├── agency.constants.ts         # Cache TTL, WhatsApp phone_number_id pattern
+│   ├── agency.service.ts           # Resolves phone_number_id → agency_id (cached
+│   │                                  with a TTL); findByUserId + createForUser
+│   │                                  (onboarding) + updateForAgency (settings)
+│   ├── agency.controller.ts        # GET /agencies/me + POST /agencies
+│   │                                  (SupabaseUserGuard); PATCH /agencies/me
+│   │                                  (SupabaseAuthGuard) — see Auth Boundary
+│   └── dto/{create,update}-agency.dto.ts
 │
 ├── conversation/
 │   ├── conversation.module.ts
@@ -375,7 +378,11 @@ components/
 ├── shell/                         # Dashboard chrome, shared by every (dashboard) route
 │   ├── dashboard-shell.tsx        # Client Component: owns sidebar-collapsed state
 │   │                                 (persisted to localStorage), composes AppSidebar
-│   │                                 + Topbar + a centered content well
+│   │                                 + Topbar + a centered content well, and renders
+│   │                                 WhatsAppBanner when whatsappConnected is false
+│   ├── whatsapp-banner.tsx        # "WhatsApp no conectado" notice shown above every
+│   │                                 dashboard page until agencies.whatsapp_phone_
+│   │                                 number_id is set; hidden on /settings
 │   ├── app-sidebar.tsx            # Desktop nav rail (hidden below `md`), animated
 │   │                                 width-collapse via motion.aside + springDefault
 │   ├── mobile-nav.tsx             # Sheet-based nav for below `md`, same NAV_ITEMS
@@ -449,7 +456,8 @@ app/
     │                                 supabase.auth.getUser() + redirect('/login')
     │                                 if unauthenticated; then GET /agencies/me +
     │                                 redirect('/onboarding') if the user has no
-    │                                 agency yet; renders DashboardShell
+    │                                 agency yet; renders DashboardShell, passing
+    │                                 whatsappConnected from that same agency
     ├── actions.ts                 # 'use server' — logout() (signOut + redirect)
     ├── error.tsx                  # Client Component boundary — generic Spanish
     │                                 error + retry, catches apiGet()/action throws
@@ -490,6 +498,16 @@ app/
     │   └── [id]/
     │       ├── page.tsx            # Detail: pre-filled edit form + availability toggle
     │       └── loading.tsx          # DetailSkeleton fallback
+    ├── settings/
+    │   ├── page.tsx                # GET /agencies/me → SettingsForm. Agency data
+    │   │                             (name, contact email, phone) + the WhatsApp
+    │   │                             connection, with a Conectado/No conectado badge
+    │   ├── settings-form.tsx       # useActionState form (Client Component); an empty
+    │   │                             Phone Number ID disconnects the number
+    │   ├── actions.ts              # updateAgency — PATCH /agencies/me, then
+    │   │                             revalidatePath('/', 'layout') so the banner
+    │   │                             appears/disappears without a reload
+    │   └── loading.tsx             # Card/field skeleton fallback
     └── leads/
         ├── page.tsx                 # List (GET /leads, paginated) + status filter tabs
         │                             (Todos/Nuevo/Contactado/Cerrado via ?status=) +
@@ -666,6 +684,19 @@ Each layer is independent. A failure at one layer does not bypass the others.
 | NestJS backend | Service role key | Bypasses RLS — agency_id enforced in every query |
 
 **Onboarding exception:** `GET /agencies/me` and `POST /agencies` are the only admin routes that do **not** require a linked agency — a user with none yet must still be able to check for one and create it. They sit behind `SupabaseUserGuard` (verifies the token, attaches `{ userId }`, never queries `agency_users`) instead of `SupabaseAuthGuard`, and use `@CurrentUser()` instead of `@CurrentAgency()`. `POST /agencies` calls the `create_agency_with_owner` Postgres RPC, which inserts `agencies` + `agency_users` in one transaction — a failed link can never leave an orphaned agency row (relevant since `agencies.email` is `UNIQUE`). Every other admin route stays behind `SupabaseAuthGuard`, unchanged.
+
+`AgencyController` is therefore the one admin controller whose guard is declared **per route**, not on the class: `PATCH /agencies/me` (the settings screen) edits an agency that necessarily exists, so it uses `SupabaseAuthGuard` + `@CurrentAgency()` like every other admin route — the agency id is never read from the body.
+
+### WhatsApp Connection (`agencies.whatsapp_phone_number_id`)
+
+A new agency is created without a `whatsapp_phone_number_id`; Meta's id isn't something an agency has at signup. Until it's set, `AgencyService.resolveIdByPhoneNumberId` finds no tenant and `WebhookService` drops every inbound message — correct (an unattributable message must never be answered), but invisible to the agency. Two things close that gap:
+
+- **Self-serve connection.** `PATCH /agencies/me` (admin panel → *Configuración*) lets an agency set or clear its own `phone_number_id`. The column is `UNIQUE`, so claiming a number another agency holds returns a `409` with a Spanish message rather than a 500.
+- **A persistent banner.** `(dashboard)/layout.tsx` already loads the agency for the onboarding check, so it passes `whatsappConnected` down to `DashboardShell`, which renders `WhatsAppBanner` above every page until the number is connected. Non-blocking by design — loading properties first is a reasonable order to work in.
+
+**Cache invalidation.** `AgencyService` caches `phone_number_id → agency_id` and `agency_id → email` in-process. Now that an agency can change either from the UI, both caches carry a TTL (`AGENCY_CACHE_TTL_MS`) *and* are evicted explicitly on update. The TTL is not a performance knob: the instance serving the `PATCH` evicts its own entries immediately, but on a multi-instance deploy the others would otherwise keep a released number pointing at its former owner until the next restart — routing another tenant's messages to the wrong agency.
+
+**Known limitation — outbound is still single-tenant.** `WhatsAppService` reads `META_PHONE_NUMBER_ID` and `META_API_TOKEN` from the environment at boot, so Luca always *replies* from the one configured number even though inbound routing is per-agency. Per-agency sending needs tenant-scoped credentials (and somewhere safe to keep them); it is deliberately out of scope for now.
 
 ---
 

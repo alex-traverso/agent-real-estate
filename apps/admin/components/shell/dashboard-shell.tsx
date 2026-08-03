@@ -3,11 +3,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AppSidebar } from "./app-sidebar";
 import { Topbar } from "./topbar";
+import { WhatsAppBanner } from "./whatsapp-banner";
 
 const COLLAPSED_STORAGE_KEY = "admin:sidebar-collapsed";
 
 type DashboardShellProps = {
   userEmail: string;
+  whatsappConnected: boolean;
   children: ReactNode;
 };
 
@@ -17,7 +19,11 @@ type DashboardShellProps = {
  * persisted to localStorage; the auth check that guards this shell stays in
  * the server-rendered (dashboard)/layout.tsx above it.
  */
-export function DashboardShell({ userEmail, children }: DashboardShellProps) {
+export function DashboardShell({
+  userEmail,
+  whatsappConnected,
+  children,
+}: DashboardShellProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   // Reads the stored preference once, after mount — the server always
@@ -46,6 +52,7 @@ export function DashboardShell({ userEmail, children }: DashboardShellProps) {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar userEmail={userEmail} />
         <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-8">
+          {!whatsappConnected && <WhatsAppBanner />}
           {children}
         </main>
       </div>

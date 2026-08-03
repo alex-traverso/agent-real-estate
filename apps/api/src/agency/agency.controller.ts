@@ -1,19 +1,26 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { SupabaseAuthGuard } from '../auth/supabase-auth.guard';
 import { SupabaseUserGuard } from '../auth/supabase-user.guard';
+import { CurrentAgency } from '../auth/current-agency.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AgencyService } from './agency.service';
 import { CreateAgencyDto } from './dto/create-agency.dto';
+import { UpdateAgencyDto } from './dto/update-agency.dto';
 
 /**
- * Agency onboarding for the admin panel. Unlike every other admin-facing
- * controller, this one uses SupabaseUserGuard instead of SupabaseAuthGuard —
- * a user with no agency yet must still be able to check for one (`GET /me`)
- * and create it (`POST`); SupabaseAuthGuard would reject them before they
- * ever reached the handler (CLAUDE.md: agency_id must never be derived from
- * user input, but here there's no agency yet for the handler to derive).
+ * Agency onboarding and settings for the admin panel. This is the only
+ * admin-facing controller whose routes don't share a single guard, because
+ * they don't share a precondition:
+ *
+ * - `GET me` / `POST` are the onboarding pair and use SupabaseUserGuard: a
+ *   user with no agency yet must still be able to check for one and create it,
+ *   and SupabaseAuthGuard would reject them before the handler ran.
+ * - `PATCH me` edits an agency that necessarily exists, so it uses the strict
+ *   SupabaseAuthGuard and takes the tenant from @CurrentAgency() — the id is
+ *   never read from the body (CLAUDE.md: agency_id must never be derived from
+ *   user input).
  */
 @Controller('agencies')
-@UseGuards(SupabaseUserGuard)
 export class AgencyController {
   constructor(private readonly agency: AgencyService) {}
 
@@ -24,12 +31,20 @@ export class AgencyController {
    * onboarding.
    */
   @Get('me')
+  @UseGuards(SupabaseUserGuard)
   async getMine(@CurrentUser() userId: string) {
     return { agency: await this.agency.findByUserId(userId) };
   }
 
   @Post()
+  @UseGuards(SupabaseUserGuard)
   create(@CurrentUser() userId: string, @Body() dto: CreateAgencyDto) {
     return this.agency.createForUser(userId, dto);
+  }
+
+  @Patch('me')
+  @UseGuards(SupabaseAuthGuard)
+  update(@CurrentAgency() agencyId: string, @Body() dto: UpdateAgencyDto) {
+    return this.agency.updateForAgency(agencyId, dto);
   }
 }

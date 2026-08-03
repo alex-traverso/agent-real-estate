@@ -1,16 +1,23 @@
 import { AgencyController } from './agency.controller';
 import type { AgencyService } from './agency.service';
 import type { CreateAgencyDto } from './dto/create-agency.dto';
+import type { UpdateAgencyDto } from './dto/update-agency.dto';
 
 function createController() {
   const findByUserId = jest.fn();
   const createForUser = jest.fn();
-  const agency = { findByUserId, createForUser } as unknown as AgencyService;
+  const updateForAgency = jest.fn();
+  const agency = {
+    findByUserId,
+    createForUser,
+    updateForAgency,
+  } as unknown as AgencyService;
 
   return {
     controller: new AgencyController(agency),
     findByUserId,
     createForUser,
+    updateForAgency,
   };
 }
 
@@ -47,6 +54,25 @@ describe('AgencyController', () => {
 
       expect(result).toEqual({ id: 'agency-1' });
       expect(createForUser).toHaveBeenCalledWith('user-1', dto);
+    });
+  });
+
+  describe('update', () => {
+    it('delegates to AgencyService.updateForAgency with the agencyId from the guard', async () => {
+      const dto: UpdateAgencyDto = { whatsappPhoneNumberId: '123456789012345' };
+      const { controller, updateForAgency } = createController();
+      updateForAgency.mockResolvedValue({
+        id: 'agency-1',
+        whatsapp_phone_number_id: '123456789012345',
+      });
+
+      const result = await controller.update('agency-1', dto);
+
+      expect(result).toEqual({
+        id: 'agency-1',
+        whatsapp_phone_number_id: '123456789012345',
+      });
+      expect(updateForAgency).toHaveBeenCalledWith('agency-1', dto);
     });
   });
 });

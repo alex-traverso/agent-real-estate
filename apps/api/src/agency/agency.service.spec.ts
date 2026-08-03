@@ -1,6 +1,7 @@
-import { ConflictException, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { AgencyService } from './agency.service';
 import type { SupabaseService } from '../common/supabase/supabase.service';
+import { AGENCY_CACHE_TTL_MS } from './agency.constants';
 import type { CreateAgencyDto } from './dto/create-agency.dto';
 
 type MaybeSingleResult = {
@@ -42,6 +43,23 @@ describe('AgencyService', () => {
     await service.resolveIdByPhoneNumberId('pnid-123');
 
     expect(from).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-reads a cached mapping once its TTL has passed', async () => {
+    const { service, from } = createService({
+      data: { id: 'agency-1' },
+      error: null,
+    });
+    const start = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(start);
+
+    await service.resolveIdByPhoneNumberId('pnid-123');
+    now.mockReturnValue(start + AGENCY_CACHE_TTL_MS + 1);
+    await service.resolveIdByPhoneNumberId('pnid-123');
+
+    // Without the TTL, an instance that didn't serve the PATCH would keep a
+    // released number pointing at its old agency until the next restart.
+    expect(from).toHaveBeenCalledTimes(2);
   });
 
   it('returns null when no agency is registered for the number', async () => {
@@ -287,6 +305,175 @@ describe('AgencyService', () => {
       await expect(service.createForUser('user-1', dto)).rejects.toThrow(
         'Failed to create agency',
       );
+    });
+  });
+
+  describe('updateForAgency', () => {
+    /**
+     * One mock serving both query shapes the update path touches: the
+     * `select().eq().maybeSingle()` reads (resolveIdByPhoneNumberId,
+     * getContactEmail) and the `update().eq().select().single()` write — the
+     * cache-invalidation tests interleave them against the same service.
+     */
+    function createUpdateService(options?: {
+      update?: {
+        data: unknown;
+        error: { code?: string; message: string } | null;
+      };
+      read?: MaybeSingleResult;
+    }) {
+      const single = jest
+        .fn()
+        .mockResolvedValue(
+          options?.update ?? { data: { id: 'agency-1' }, error: null },
+        );
+      const updateSelect = jest.fn().mockReturnValue({ single });
+      const updateEq = jest.fn().mockReturnValue({ select: updateSelect });
+      const update = jest.fn().mockReturnValue({ eq: updateEq });
+
+      const maybeSingle = jest
+        .fn()
+        .mockResolvedValue(options?.read ?? { data: null, error: null });
+      const readEq = jest.fn().mockReturnValue({ maybeSingle });
+      const select = jest.fn().mockReturnValue({ eq: readEq });
+
+      const from = jest.fn().mockReturnValue({ select, update });
+      const supabase = { client: { from } } as unknown as SupabaseService;
+      return {
+        service: new AgencyService(supabase),
+        update,
+        updateEq,
+        select,
+      };
+    }
+
+    it('writes only the fields present in the dto, mapped to snake_case', async () => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const { service, update, updateEq } = createUpdateService();
+
+      await service.updateForAgency('agency-1', {
+        name: 'Inmobiliaria Test',
+        whatsappPhoneNumberId: '123456789012345',
+      });
+
+      expect(update).toHaveBeenCalledWith({
+        name: 'Inmobiliaria Test',
+        whatsapp_phone_number_id: '123456789012345',
+      });
+      expect(updateEq).toHaveBeenCalledWith('id', 'agency-1');
+    });
+
+    it('treats an explicit null as "clear this column", not as absent', async () => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const { service, update } = createUpdateService();
+
+      await service.updateForAgency('agency-1', {
+        whatsappPhoneNumberId: null,
+      });
+
+      expect(update).toHaveBeenCalledWith({ whatsapp_phone_number_id: null });
+    });
+
+    it('rejects a dto with no fields instead of issuing an empty update', async () => {
+      const { service, update } = createUpdateService();
+
+      await expect(service.updateForAgency('agency-1', {})).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('maps a unique violation on whatsapp_phone_number_id to a Conflict', async () => {
+      const { service } = createUpdateService({
+        update: {
+          data: null,
+          error: {
+            code: '23505',
+            message:
+              'duplicate key value violates unique constraint "agencies_whatsapp_phone_number_id_key"',
+          },
+        },
+      });
+
+      await expect(
+        service.updateForAgency('agency-1', {
+          whatsappPhoneNumberId: '123456789012345',
+        }),
+      ).rejects.toThrow(
+        'Ese número de WhatsApp ya está vinculado a otra inmobiliaria.',
+      );
+    });
+
+    it('maps a unique violation on agencies.email to a Conflict', async () => {
+      const { service } = createUpdateService({
+        update: {
+          data: null,
+          error: {
+            code: '23505',
+            message:
+              'duplicate key value violates unique constraint "agencies_email_key"',
+          },
+        },
+      });
+
+      await expect(
+        service.updateForAgency('agency-1', { email: 'taken@agency.com' }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws a generic error for any other update failure', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { service } = createUpdateService({
+        update: { data: null, error: { message: 'connection reset' } },
+      });
+
+      await expect(
+        service.updateForAgency('agency-1', { name: 'Nueva' }),
+      ).rejects.toThrow('Failed to update agency');
+    });
+
+    it('evicts the number this agency just released from the cache', async () => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const { service, select } = createUpdateService({
+        read: { data: { id: 'agency-1' }, error: null },
+      });
+
+      await service.resolveIdByPhoneNumberId('pnid-old');
+      await service.updateForAgency('agency-1', {
+        whatsappPhoneNumberId: null,
+      });
+      await service.resolveIdByPhoneNumberId('pnid-old');
+
+      // Two reads, not one: the cached pnid-old -> agency-1 entry is gone.
+      expect(select).toHaveBeenCalledTimes(2);
+    });
+
+    it('evicts a number claimed from another agency, so it cannot route to the previous owner', async () => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const { service, select } = createUpdateService({
+        read: { data: { id: 'agency-2' }, error: null },
+      });
+
+      await service.resolveIdByPhoneNumberId('pnid-shared');
+      await service.updateForAgency('agency-1', {
+        whatsappPhoneNumberId: 'pnid-shared',
+      });
+      await service.resolveIdByPhoneNumberId('pnid-shared');
+
+      expect(select).toHaveBeenCalledTimes(2);
+    });
+
+    it('evicts the cached contact email so escalations reach the new address', async () => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const { service, select } = createUpdateService({
+        read: { data: { email: 'old@agency.com' }, error: null },
+      });
+
+      await service.getContactEmail('agency-1');
+      await service.updateForAgency('agency-1', { email: 'new@agency.com' });
+      await service.getContactEmail('agency-1');
+
+      expect(select).toHaveBeenCalledTimes(2);
     });
   });
 });
